@@ -1,0 +1,179 @@
+/* ===== reset / base ===== */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: "Hiragino Kaku Gothic ProN", "Hiragino Sans", "Yu Gothic", sans-serif;
+  background: #f5f7fa;
+  color: #1a1a2e;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+/* ===== layout ===== */
+.container { max-width: 1200px; margin: 0 auto; padding: 0 16px; }
+
+.site-header {
+  background: #1a3a5c;
+  color: #fff;
+  padding: 18px 0 14px;
+}
+.site-header h1 { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+.site-header p  { font-size: 13px; opacity: .8; }
+
+main { padding: 20px 0 40px; }
+
+.content-grid {
+  display: grid;
+  grid-template-columns: 1fr 360px;
+  gap: 16px;
+  margin-top: 16px;
+}
+@media (max-width: 860px) {
+  .content-grid { grid-template-columns: 1fr; }
+}
+
+.side-column { display: flex; flex-direction: column; gap: 16px; }
+
+/* ===== panel ===== */
+.panel {
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 1px 4px rgba(0,0,0,.08);
+  padding: 16px;
+}
+.panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.panel-head h2 { font-size: 15px; font-weight: 600; color: #1a3a5c; }
+
+/* ===== search controls ===== */
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 120px;
+}
+.field span { font-size: 12px; font-weight: 600; color: #555; }
+.field.grow { flex: 1 1 180px; }
+.field.field-mid { flex: 0 0 140px; }
+.field.field-small { flex: 0 0 90px; }
+
+input[type="text"],
+input[type="number"],
+select {
+  padding: 7px 10px;
+  border: 1.5px solid #d0d8e4;
+  border-radius: 6px;
+  font-size: 13px;
+  background: #fff;
+  color: #1a1a2e;
+  transition: border-color .15s;
+  width: 100%;
+}
+input[type="text"]:focus,
+input[type="number"]:focus,
+select:focus {
+  outline: none;
+  border-color: #2e5fa3;
+}
+
+/* ===== buttons ===== */
+.button {
+  padding: 8px 18px;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .15s, transform .1s;
+}
+.button:active { transform: scale(.97); }
+.button.primary  { background: #2e5fa3; color: #fff; }
+.button.primary:hover  { background: #1a3a5c; }
+.button.secondary { background: #e8f0fb; color: #2e5fa3; }
+.button.secondary:hover { background: #d0dff5; }
+
+/* ===== status row ===== */
+.status-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.badge {
+  background: #edf2fb;
+  color: #2e5fa3;
+  border-radius: 99px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 500;
+}
+.message { margin-top: 8px; font-size: 13px; color: #c0392b; min-height: 18px; }
+
+/* ===== map ===== */
+#map {
+  height: 480px;
+  border-radius: 8px;
+  overflow: hidden;
+}
+@media (max-width: 860px) { #map { height: 340px; } }
+
+.count-pill {
+  background: #2e5fa3;
+  color: #fff;
+  border-radius: 99px;
+  padding: 2px 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.summary-text { font-size: 12px; color: #888; }
+
+/* ===== result cards ===== */
+#results { display: flex; flex-direction: column; gap: 8px; }
+
+.result-card {
+  border: 1.5px solid #e8eef5;
+  border-radius: 8px;
+  padding: 10px 12px;
+  transition: border-color .15s;
+}
+.result-card:hover { border-color: #2e5fa3; }
+.result-card.cheapest {
+  border-color: #2e5fa3;
+  background: #f0f6ff;
+}
+.result-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+.result-rank  { font-size: 13px; font-weight: 700; color: #1a3a5c; }
+.result-meta  { font-size: 12px; color: #888; margin-top: 2px; }
+.result-price { font-size: 16px; font-weight: 700; color: #1a3a5c; margin-top: 4px; }
+.result-sub   { font-size: 11px; color: #aaa; margin-top: 2px; }
+.cheapest-tag {
+  background: #2e5fa3;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.empty-state { font-size: 13px; color: #999; padding: 20px 0; text-align: center; }
+
+/* ===== hint panel ===== */
+.hint-panel h2 { font-size: 14px; font-weight: 600; color: #1a3a5c; margin-bottom: 8px; }
+.hint-panel ul { padding-left: 18px; }
+.hint-panel li { font-size: 12px; color: #666; margin-bottom: 4px; }

@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>近所の最安商品マップ</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <h1>近所の最安商品マップ</h1>
+      <p>欲しい商品を検索すると、現在地の近くにある店舗の価格を地図と一覧で比較できます。</p>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="panel search-panel">
+      <div class="controls">
+        <label class="field grow">
+          <span>商品名</span>
+          <input id="keywordInput" type="text" value="豆腐" placeholder="例: 豆腐、牛乳、卵、サラダチキン" />
+        </label>
+
+        <label class="field field-mid">
+          <span>カテゴリ</span>
+          <select id="categorySelect">
+            <option value="">すべて</option>
+          </select>
+        </label>
+
+        <label class="field field-mid">
+          <span>店舗タイプ</span>
+          <select id="storeTypeSelect">
+            <option value="">すべて</option>
+          </select>
+        </label>
+
+        <label class="field field-small">
+          <span>半径(km)</span>
+          <input id="radiusInput" type="number" min="0.5" step="0.5" value="3" />
+        </label>
+
+        <label class="field field-mid">
+          <span>並び順</span>
+          <select id="sortSelect">
+            <option value="price">価格が安い順</option>
+            <option value="distance">距離が近い順</option>
+            <option value="updated">更新日が新しい順</option>
+          </select>
+        </label>
+
+        <button id="searchButton" class="button primary">検索する</button>
+        <button id="locationButton" class="button secondary">現在地取得</button>
+      </div>
+
+      <div class="status-row">
+        <span class="badge" id="locationStatus">初期位置: 東京駅周辺</span>
+        <span class="badge" id="searchStatus">検索語: 豆腐</span>
+        <span class="badge" id="filterStatus">絞り込み: なし</span>
+        <span class="badge" id="radiusStatus">検索半径: 3km</span>
+      </div>
+
+      <p id="message" class="message"></p>
+    </section>
+
+    <section class="content-grid">
+      <section class="panel map-panel">
+        <div class="panel-head">
+          <h2>地図表示</h2>
+          <span id="resultCount" class="count-pill">0件</span>
+        </div>
+        <div id="map"></div>
+      </section>
+
+      <aside class="side-column">
+        <section class="panel result-panel">
+          <div class="panel-head">
+            <h2>検索結果</h2>
+            <span id="summaryText" class="summary-text"></span>
+          </div>
+          <div id="results"></div>
+        </section>
+
+        <section class="panel hint-panel">
+          <h2>使い方</h2>
+          <ul>
+            <li>商品名は部分一致に加えて、少しゆるめに検索します</li>
+            <li>カテゴリや店舗タイプで絞り込めます</li>
+            <li>並び順は価格・距離・更新日で切り替えられます</li>
+            <li>stores.json を差し替えるとデータ更新できます</li>
+          </ul>
+        </section>
+      </aside>
+    </section>
+  </main>
+
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script src="./config.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>
