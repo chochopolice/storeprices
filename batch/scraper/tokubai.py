@@ -4,10 +4,21 @@ tokubai.py  ─  トクバイ HTML スクレイピング層
 【重要】実行前に必ず確認すること
   1. https://tokubai.co.jp/robots.txt を確認
   2. 利用規約の「データの利用」条項を確認
-  3. 禁止されている場合はこのモジュールを使用しないこと
 
-セレクタは実際の HTML 構造に合わせて調整が必要です。
-ブラウザの開発者ツール (F12) で確認してください。
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  トクバイ店舗IDの調べ方（STORE_MAPPING 設定手順）
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  1. https://tokubai.co.jp を開く
+  2. 店舗名で検索（例: "行徳" "南行徳"）
+  3. 店舗ページに遷移したときのURLを確認
+       例: https://tokubai.co.jp/stores/12345
+                                         ^^^^^ これが tokubai_id
+  4. 下の STORE_MAPPING に追加する
+
+  Supabase の supabase_id は:
+    Supabase ダッシュボード → Table Editor → stores テーブル
+    → 対象店舗の id 列をコピー
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 
 import asyncio
@@ -19,18 +30,82 @@ import httpx
 from bs4 import BeautifulSoup
 
 TOKUBAI_BASE = "https://tokubai.co.jp"
+_USER_AGENT  = "PriceBot/1.0 (+mailto:your@email.com)"
 
 # robots.txt キャッシュ（1回だけ取得）
 _rp: urllib.robotparser.RobotFileParser | None = None
-_USER_AGENT = "PriceBot/1.0 (+mailto:your@email.com)"
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  ★ 行徳・南行徳エリアの店舗マッピング設定
+#
+#  tokubai_id の調べ方は上のコメントを参照してください。
+#  supabase_id は Supabase に stores データを登録後に設定します。
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STORE_MAPPING: list[dict] = [
+    {
+        "tokubai_id":  "",          # TODO: トクバイのURLで確認して入力
+        "supabase_id": "",          # TODO: Supabase stores テーブルの id
+        "name":        "イオン 市川妙典店",
+        "area":        "妙典",
+        "memo":        "妙典駅徒歩1分",
+    },
+    {
+        "tokubai_id":  "",
+        "supabase_id": "",
+        "name":        "マルエツ 行徳店",
+        "area":        "行徳",
+        "memo":        "行徳駅徒歩3分",
+    },
+    {
+        "tokubai_id":  "",
+        "supabase_id": "",
+        "name":        "ライフ 南行徳店",
+        "area":        "南行徳",
+        "memo":        "南行徳駅徒歩5分",
+    },
+    {
+        "tokubai_id":  "",
+        "supabase_id": "",
+        "name":        "業務スーパー 南行徳店",
+        "area":        "南行徳",
+        "memo":        "南行徳駅徒歩8分",
+    },
+    {
+        "tokubai_id":  "",
+        "supabase_id": "",
+        "name":        "ウエルシア薬局 行徳駅前店",
+        "area":        "行徳",
+        "memo":        "行徳駅前",
+    },
+    {
+        "tokubai_id":  "",
+        "supabase_id": "",
+        "name":        "マツモトキヨシ 南行徳店",
+        "area":        "南行徳",
+        "memo":        "南行徳駅徒歩2分",
+    },
+    {
+        "tokubai_id":  "",
+        "supabase_id": "",
+        "name":        "Selection FOODS MARKET",
+        "area":        "妙典・行徳",
+        "memo":        "地域密着型スーパー",
+    },
+    {
+        "tokubai_id":  "",
+        "supabase_id": "",
+        "name":        "東武ストア 行徳店",
+        "area":        "行徳",
+        "memo":        "行徳駅直結",
+    },
+]
 
 
 async def _get_robots() -> urllib.robotparser.RobotFileParser:
-    """robots.txt を取得してパース（初回のみ）"""
     global _rp
     if _rp is not None:
         return _rp
-
     _rp = urllib.robotparser.RobotFileParser()
     try:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -38,50 +113,32 @@ async def _get_robots() -> urllib.robotparser.RobotFileParser:
             _rp.parse(r.text.splitlines())
     except Exception as e:
         print(f"  robots.txt 取得失敗（許可側でフォールバック）: {e}")
-        # 取得できない場合は許可として扱う（保守的にしたい場合は False を返す）
     return _rp
 
 
 async def is_allowed(path: str) -> bool:
-    """robots.txt でアクセス許可されているか確認"""
     rp = await _get_robots()
     return rp.can_fetch(_USER_AGENT, f"{TOKUBAI_BASE}{path}")
-
-
-# ─────────────────────────────────────────────
-# 店舗マッピング設定
-# stores.json の supabase_id と tokubai_store_id を対応させる
-# tokubai_store_id はブラウザで store ページの URL から確認する
-#   例: https://tokubai.co.jp/stores/12345  → "12345"
-# ─────────────────────────────────────────────
-STORE_MAPPING: list[dict] = [
-    # {
-    #     "tokubai_id":  "12345",        # トクバイの店舗ID
-    #     "supabase_id": "uuid-s001",    # Supabase stores テーブルの id
-    #     "name":        "Selection FOODS MARKET",
-    # },
-    # 実際の店舗を追加してください
-]
 
 
 async def fetch_store_prices(tokubai_store_id: str) -> list[dict]:
     """
     トクバイの商品ページからテキスト価格を抽出する。
-
-    Returns:
-        [{"raw_name": str, "price": int, "raw_text": str, "source_url": str}, ...]
     """
-    path = f"/stores/{tokubai_store_id}/products"
+    if not tokubai_store_id:
+        print("  tokubai_id が未設定 → スキップ")
+        return []
 
+    path = f"/stores/{tokubai_store_id}/products"
     if not await is_allowed(path):
         print(f"  robots.txt Disallow: {path} → スキップ")
         return []
 
     url = f"{TOKUBAI_BASE}{path}"
     headers = {
-        "User-Agent": _USER_AGENT,
+        "User-Agent":      _USER_AGENT,
         "Accept-Language": "ja,en;q=0.9",
-        "Accept": "text/html,application/xhtml+xml",
+        "Accept":          "text/html,application/xhtml+xml",
     }
 
     async with httpx.AsyncClient(headers=headers, timeout=20, follow_redirects=True) as client:
@@ -111,44 +168,35 @@ async def fetch_store_prices(tokubai_store_id: str) -> list[dict]:
         cards = soup.select(card_sel)
         if not cards:
             continue
-
         for card in cards:
             name_el  = _first_match(card, NAME_SELECTORS)
             price_el = _first_match(card, PRICE_SELECTORS)
-
             if not name_el or not price_el:
                 continue
-
             name       = name_el.get_text(strip=True)
             price_text = price_el.get_text(strip=True)
             price      = _extract_price(price_text)
-
             if price is None:
                 continue
-
             results.append({
                 "raw_name":   name,
                 "price":      price,
                 "raw_text":   f"{name} {price_text}",
                 "source_url": url,
             })
-
         if results:
-            break  # いずれかのセレクタでヒットしたら終了
+            break
 
     print(f"  テキスト取得: {len(results)}件 ({url})")
     return results
 
 
 async def fetch_flyer_image_urls(tokubai_store_id: str) -> list[str]:
-    """
-    チラシ画像 URL の一覧を取得する（OCR 対象リスト作成用）。
+    """チラシ画像 URL の一覧を取得する（OCR 対象リスト作成用）"""
+    if not tokubai_store_id:
+        return []
 
-    Returns:
-        [image_url, ...]
-    """
     path = f"/stores/{tokubai_store_id}/flyers"
-
     if not await is_allowed(path):
         print(f"  robots.txt Disallow: {path} → スキップ")
         return []
@@ -165,10 +213,6 @@ async def fetch_flyer_image_urls(tokubai_store_id: str) -> list[str]:
             return []
 
     soup = BeautifulSoup(r.text, "lxml")
-
-    # ─────────────────────────────────────────────────────────────
-    # ★ チラシ画像のセレクタも実際の HTML に合わせて要修正 ★
-    # ─────────────────────────────────────────────────────────────
     img_urls: list[str] = []
     for img in soup.select(".flyer-image img, [data-testid='flyer-image'], .flyer img"):
         src = img.get("src") or img.get("data-src")
@@ -180,11 +224,37 @@ async def fetch_flyer_image_urls(tokubai_store_id: str) -> list[str]:
 
 
 # ─────────────────────────────────────────────
+# STORE_MAPPING の設定状況を確認するユーティリティ
+# python -m scraper.tokubai で実行
+# ─────────────────────────────────────────────
+def check_mapping_status() -> None:
+    """STORE_MAPPING の設定状況を一覧表示する"""
+    print("=" * 60)
+    print("行徳・南行徳エリア 店舗マッピング設定状況")
+    print("=" * 60)
+    configured = 0
+    for store in STORE_MAPPING:
+        has_tokubai = bool(store.get("tokubai_id"))
+        has_supabase = bool(store.get("supabase_id"))
+        status = "✓ 完了" if (has_tokubai and has_supabase) else \
+                 "⚠ 一部" if (has_tokubai or has_supabase) else \
+                 "✗ 未設定"
+        if has_tokubai and has_supabase:
+            configured += 1
+        print(f"  [{status}] {store['name']}")
+        if not has_tokubai:
+            print(f"           → tokubai_id を設定してください")
+        if not has_supabase:
+            print(f"           → supabase_id を設定してください（Supabase登録後）")
+    print()
+    print(f"  設定完了: {configured}/{len(STORE_MAPPING)} 店舗")
+    print("=" * 60)
+
+
+# ─────────────────────────────────────────────
 # ヘルパー
 # ─────────────────────────────────────────────
-
-def _first_match(parent: BeautifulSoup, selectors: list[str]):
-    """複数セレクタを順に試して最初にヒットした要素を返す"""
+def _first_match(parent, selectors: list[str]):
     for sel in selectors:
         el = parent.select_one(sel)
         if el:
@@ -193,18 +263,15 @@ def _first_match(parent: BeautifulSoup, selectors: list[str]):
 
 
 def _extract_price(price_text: str) -> int | None:
-    """
-    価格テキストから整数価格を抽出する。
-    対応フォーマット例:
-      "¥198"  "198円"  "税込198円"  "198(税込)"  "1,280円"
-    """
-    # カンマを除去してから数字列を探す
     cleaned = price_text.replace(",", "")
     m = re.search(r"(\d{2,5})", cleaned)
     if not m:
         return None
     price = int(m.group(1))
-    # 異常値除外
     if price < 30 or price > 99999:
         return None
     return price
+
+
+if __name__ == "__main__":
+    check_mapping_status()
