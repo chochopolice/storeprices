@@ -17,31 +17,24 @@
 
   <main class="container">
     <section class="panel search-panel">
+
       <div class="controls">
         <label class="field grow">
           <span>商品名</span>
           <input id="keywordInput" type="text" value="豆腐" placeholder="例: 豆腐、牛乳、卵、サラダチキン" />
         </label>
-
         <label class="field field-mid">
           <span>カテゴリ</span>
-          <select id="categorySelect">
-            <option value="">すべて</option>
-          </select>
+          <select id="categorySelect"><option value="">すべて</option></select>
         </label>
-
         <label class="field field-mid">
           <span>店舗タイプ</span>
-          <select id="storeTypeSelect">
-            <option value="">すべて</option>
-          </select>
+          <select id="storeTypeSelect"><option value="">すべて</option></select>
         </label>
-
         <label class="field field-small">
           <span>半径(km)</span>
           <input id="radiusInput" type="number" min="0.5" step="0.5" value="3" />
         </label>
-
         <label class="field field-mid">
           <span>並び順</span>
           <select id="sortSelect">
@@ -50,9 +43,19 @@
             <option value="updated">更新日が新しい順</option>
           </select>
         </label>
-
         <button id="searchButton" class="button primary">検索する</button>
         <button id="locationButton" class="button secondary">現在地取得</button>
+      </div>
+
+      <!-- 地点指定エリア -->
+      <div class="location-row">
+        <span class="location-label">起点を指定：</span>
+        <div class="location-input-wrap">
+          <input id="addressInput" type="text"
+            placeholder="住所・駅名・施設名を入力　例: 秋葉原駅、渋谷区道玄坂" />
+          <button id="geocodeButton" class="button secondary small">この住所から検索</button>
+        </div>
+        <span class="location-hint">または地図をクリックして起点を指定</span>
       </div>
 
       <div class="status-row">
@@ -72,6 +75,7 @@
           <span id="resultCount" class="count-pill">0件</span>
         </div>
         <div id="map"></div>
+        <p class="map-hint">地図をクリックするとその地点を検索の起点に設定できます</p>
       </section>
 
       <aside class="side-column">
@@ -88,7 +92,8 @@
           <ul>
             <li>商品名は部分一致に加えて、少しゆるめに検索します</li>
             <li>カテゴリや店舗タイプで絞り込めます</li>
-            <li>並び順は価格・距離・更新日で切り替えられます</li>
+            <li><strong>結果カードをクリック</strong>すると地図がその店舗に移動します</li>
+            <li>住所・駅名を入力するか地図をクリックして起点を変更できます</li>
             <li>stores.json を差し替えるとデータ更新できます</li>
           </ul>
         </section>
