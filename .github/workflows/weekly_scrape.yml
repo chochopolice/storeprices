@@ -1,1 +1,62 @@
+name: Weekly Price Scrape
 
+on:
+  # 毎週月曜 JST 6:00 に自動実行（UTC 日曜 21:00）
+  schedule:
+    - cron: '0 21 * * 0'
+
+  # GitHub の Actions タブから手動実行できるボタンを追加
+  workflow_dispatch:
+    inputs:
+      enable_ocr:
+        description: 'OCRを実行する (true/false)'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['true', 'false']
+      max_ocr:
+        description: '最大OCR枚数'
+        required: false
+        default: '10'
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      # ── リポジトリをチェックアウト ──────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── Python セットアップ ────────────────────────────────────
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: 'batch/requirements.txt'
+
+      # ── 依存パッケージをインストール ──────────────────────────
+      - name: Install dependencies
+        run: pip install -r batch/requirements.txt
+
+      # ── バッチ実行 ─────────────────────────────────────────────
+      - name: Run scraper
+        working-directory: batch
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          GOOGLE_VISION_KEY:    ${{ secrets.GOOGLE_VISION_KEY }}
+          # workflow_dispatch の入力を優先、なければスケジュール実行のデフォルト
+          ENABLE_OCR:     ${{ github.event.inputs.enable_ocr || 'false' }}
+          MAX_OCR_PER_RUN: ${{ github.event.inputs.max_ocr || '50' }}
+        run: python main.py
+
+      # ── 失敗時の通知（オプション）─────────────────────────────
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "::error::スクレイピングバッチが失敗しました"
+          echo "実行ログ: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          # Slack や Discord への通知はここに追加できます
