@@ -212,14 +212,11 @@ def _upsert_prices(supabase, df, store_name_to_uuid, alias_map) -> tuple[int, in
     if not rows:
         return 0, skipped
 
-    # 100件ずつ upsert（Supabase の上限対策）
+    # 100件ずつ insert（履歴として全件保存）
     inserted = 0
     for i in range(0, len(rows), 100):
         chunk = rows[i:i+100]
-        supabase.table("normalized_prices").upsert(
-            chunk,
-            on_conflict="store_id,product_group_id,valid_from"
-        ).execute()
+        supabase.table("normalized_prices").insert(chunk).execute()
         inserted += len(chunk)
 
     return inserted, skipped
@@ -261,10 +258,7 @@ def _upsert_from_stores_json(supabase, stores_json, store_name_to_uuid, alias_ma
     inserted = 0
     for i in range(0, len(rows), 100):
         chunk = rows[i:i+100]
-        supabase.table("normalized_prices").upsert(
-            chunk,
-            on_conflict="store_id,product_group_id,valid_from"
-        ).execute()
+        supabase.table("normalized_prices").insert(chunk).execute()
         inserted += len(chunk)
 
     return inserted
