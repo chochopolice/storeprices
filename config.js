@@ -14,8 +14,8 @@ const CONFIG = {
   JSON_PATH: './data/stores.json',
 
   // ── Supabase モード（Phase 1 以降に設定）───────────────────
-  SUPABASE_URL:      '',
-  SUPABASE_ANON_KEY: '',
+  SUPABASE_URL:      'https://jmohojrhuxpuoqdfxdjp.supabase.co',
+  SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imptb2hvanJodXhwdW9xZGZ4ZGpwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUwNzM4OTksImV4cCI6MjA5MDY0OTg5OX0.T2zL4l1mtMabpRlbIZZYOfnnCCIgP1PitOIeoao0DPA',
   SUPABASE_VIEW: 'latest_store_product_prices',
 
   // ── 地図デフォルト位置（行徳駅）────────────────────────────
