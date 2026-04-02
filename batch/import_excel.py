@@ -26,7 +26,7 @@ from supabase import create_client
 
 # ── 設定 ──────────────────────────────────────────────────────────────
 BASE_DIR    = Path(__file__).parent
-STORES_JSON = BASE_DIR / "data" / "stores.json"      # stores.json の場所
+STORES_JSON = BASE_DIR.parent / "data" / "stores.json"  # stores.json の場所
 EXCEL_FILE  = BASE_DIR / "最安商品リスト_20260329.xlsx"  # Excel の場所
 
 # Excel 内の店舗名 → stores.json の店舗名 対応表
