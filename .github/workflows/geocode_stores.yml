@@ -1,3 +1,14 @@
+name: Geocode Store Addresses
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'DRY RUN（確認だけ・更新しない）'
+        required: false
+        default: 'true'
+        type: choice
+        options: ['true', 'false']
 
  jobs:
    geocode:
