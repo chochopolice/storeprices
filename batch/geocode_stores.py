@@ -1,9 +1,3 @@
- (cd "$(git rev-parse --show-toplevel)" && git apply --3way <<'EOF' 
-diff --git a/batch/geocode_stores.py b/batch/geocode_stores.py
-index 0d10e2e197e82cdffd85ed27c9cb439acee9a3c6..7db8553b4e159fc71a69a525ce89fd1fda691e9e 100644
---- a/batch/geocode_stores.py
-+++ b/batch/geocode_stores.py
-@@ -1,144 +1,324 @@
  """
  geocode_stores.py  ─  Supabase の stores テーブルの住所から
                         緯度経度を自動取得して一括更新する
