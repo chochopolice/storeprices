@@ -38,16 +38,21 @@ async def main() -> None:
     from supabase import create_client
     supabase = create_client(supabase_url, os.environ["SUPABASE_SERVICE_KEY"])
 
+    target_city = os.environ.get("TARGET_CITY", "").strip()
+
     print("\n[準備] Supabase から店舗一覧を取得...")
-    res = supabase.table("stores").select("id, name, store_code").execute()
+    query = supabase.table("stores").select("id, name, store_code, address")
+    if target_city:
+        query = query.like("address", f"%{target_city}%")
+    res = query.execute()
     stores_in_db = [s for s in (res.data or []) if s.get("store_code")]
 
     if not stores_in_db:
-        print("⚠️  stores テーブルに store_code が設定された店舗がありません。")
+        suffix = f"（絞り込み条件: {target_city}）" if target_city else ""
+        print(f"  対象店舗が見つかりませんでした{suffix}")
         print("   tokubai_ichikawa_scraper.py を先に実行してください。")
         return
 
-    # STORE_MAPPING 形式に変換（既存コードと互換）
     store_mapping = [
         {
             "tokubai_id":  s["store_code"],
@@ -56,7 +61,8 @@ async def main() -> None:
         }
         for s in stores_in_db
     ]
-    print(f"  対象店舗: {len(store_mapping)} 件")
+    filter_msg = f"（{target_city} に絞り込み）" if target_city else "（全店舗）"
+    print(f"  対象店舗: {len(store_mapping)} 件 {filter_msg}")
     for s in store_mapping:
         print(f"    {s['tokubai_id']:>8}  {s['name']}")
 
