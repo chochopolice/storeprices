@@ -59,7 +59,6 @@ on:
           - '45 宮崎県'
           - '46 鹿児島県'
           - '47 沖縄県'
-    inputs:
       city_name:
         description: '対象市区町村名（例: 市川市、浦安市）空欄で全店舗'
         required: false
