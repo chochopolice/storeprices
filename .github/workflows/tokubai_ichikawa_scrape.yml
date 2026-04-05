@@ -1,18 +1,22 @@
-name: Scrape Tokubai Ichikawa Stores
+name: Scrape Tokubai Stores
 
 on:
   workflow_dispatch:
     inputs:
-      dry_run:
-        description: 'DRY RUN（確認だけ・Supabase に書き込まない）'
-        required: false
-        default: 'true'
-        type: choice
-        options: ['true', 'false']
+      prefecture_code:
+        description: '都道府県コード（例: 千葉県は 12、東京都は 13）'
+        required: true
+        default: '12'
+        type: string
+      city_name:
+        description: '市区町村名（例: 市川市、港区）'
+        required: true
+        default: '市川市'
+        type: string
       limit:
         description: 'テスト用。先頭から何件まで取得するか（空欄で全件）'
         required: false
-        default: '5'
+        default: '100'
         type: string
       sleep:
         description: 'HTTPリクエスト間の待機秒数'
@@ -20,9 +24,9 @@ on:
         default: '1.0'
         type: string
       max_pages:
-        description: '市川市一覧ページの最大巡回ページ数'
+        description: '一覧ページの最大巡回ページ数'
         required: false
-        default: '100'
+        default: '10'
         type: string
 
 jobs:
@@ -47,10 +51,15 @@ jobs:
       - name: Run scraper
         working-directory: batch
         env:
-          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        shell: bash
         run: |
+          set -euo pipefail
+
           CMD=(python tokubai_ichikawa_scraper.py
+            --prefecture-code "${{ inputs.prefecture_code }}"
+            --city-name "${{ inputs.city_name }}"
             --sleep "${{ inputs.sleep }}"
             --max-pages "${{ inputs.max_pages }}")
 
@@ -62,5 +71,8 @@ jobs:
             CMD+=(--dry-run)
           fi
 
-          printf 'Run: %s\n' "${CMD[*]}"
+          printf 'Run: '
+          printf '%q ' "${CMD[@]}"
+          printf '\n'
+
           "${CMD[@]}"
