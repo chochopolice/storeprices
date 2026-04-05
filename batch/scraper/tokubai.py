@@ -129,12 +129,13 @@ async def fetch_store_prices(tokubai_store_id: str) -> list[dict]:
         print("  tokubai_id が未設定 → スキップ")
         return []
 
-    path = f"/stores/{tokubai_store_id}/products"
+    # 店舗ページURL: https://tokubai.co.jp/{store_id}
+    url = f"{TOKUBAI_BASE}/{tokubai_store_id}"
+    path = f"/{tokubai_store_id}"
     if not await is_allowed(path):
         print(f"  robots.txt Disallow: {path} → スキップ")
         return []
 
-    url = f"{TOKUBAI_BASE}{path}"
     headers = {
         "User-Agent":      _USER_AGENT,
         "Accept-Language": "ja,en;q=0.9",
@@ -155,14 +156,20 @@ async def fetch_store_prices(tokubai_store_id: str) -> list[dict]:
     soup = BeautifulSoup(r.text, "lxml")
     results = []
 
-    # ─────────────────────────────────────────────────────────────
-    # ★ ここのセレクタはトクバイの実際の HTML 構造に合わせて要修正 ★
-    # ブラウザで https://tokubai.co.jp/stores/{id}/products を開き
-    # F12 → 要素を選択して class 名を確認してください。
-    # ─────────────────────────────────────────────────────────────
-    CARD_SELECTORS  = [".product-card", "[data-testid='product-item']", ".item-card"]
-    NAME_SELECTORS  = [".product-name", "[data-testid='product-name']", ".item-name", "h3", "h4"]
-    PRICE_SELECTORS = [".product-price", "[data-testid='price']", ".price", ".item-price"]
+    # トクバイ店舗ページの商品カード構造に合わせて抽出
+    # セレクタはブラウザ F12 で確認した実際の構造に基づく
+    CARD_SELECTORS  = [
+        ".sale-item", ".product-item", ".item",
+        "[class*='SaleItem']", "[class*='ProductItem']",
+    ]
+    NAME_SELECTORS  = [
+        ".sale-item__name", ".product-name", ".item__name",
+        "[class*='itemName']", "[class*='productName']", "h3", "h4",
+    ]
+    PRICE_SELECTORS = [
+        ".sale-item__price", ".product-price", ".item__price",
+        "[class*='itemPrice']", "[class*='price']",
+    ]
 
     for card_sel in CARD_SELECTORS:
         cards = soup.select(card_sel)
@@ -196,12 +203,13 @@ async def fetch_flyer_image_urls(tokubai_store_id: str) -> list[str]:
     if not tokubai_store_id:
         return []
 
-    path = f"/stores/{tokubai_store_id}/flyers"
+    # チラシ一覧URL: https://tokubai.co.jp/{store_id}/leaflets/
+    url = f"{TOKUBAI_BASE}/{tokubai_store_id}/leaflets/"
+    path = f"/{tokubai_store_id}/leaflets/"
     if not await is_allowed(path):
         print(f"  robots.txt Disallow: {path} → スキップ")
         return []
 
-    url = f"{TOKUBAI_BASE}{path}"
     headers = {"User-Agent": _USER_AGENT}
 
     async with httpx.AsyncClient(headers=headers, timeout=20, follow_redirects=True) as client:
@@ -214,10 +222,25 @@ async def fetch_flyer_image_urls(tokubai_store_id: str) -> list[str]:
 
     soup = BeautifulSoup(r.text, "lxml")
     img_urls: list[str] = []
-    for img in soup.select(".flyer-image img, [data-testid='flyer-image'], .flyer img"):
-        src = img.get("src") or img.get("data-src")
-        if src and src.startswith("http"):
+
+    # チラシ画像セレクタ（トクバイの実際の構造）
+    for img in soup.select(
+        ".leaflet img, .flyer img, [class*='leaflet'] img, [class*='Leaflet'] img"
+    ):
+        src = img.get("src") or img.get("data-src") or img.get("data-lazy-src")
+        if src and src.startswith("http") and not src.endswith(".gif"):
             img_urls.append(src)
+
+    # チラシへのリンクから画像URLを補完
+    if not img_urls:
+        for a in soup.select(f"a[href*='/{tokubai_store_id}/leaflets/']"):
+            href = a.get("href", "")
+            if href and "/leaflets/" in href:
+                img = a.select_one("img")
+                if img:
+                    src = img.get("src") or img.get("data-src")
+                    if src and src.startswith("http"):
+                        img_urls.append(src)
 
     print(f"  チラシ画像: {len(img_urls)}枚 ({url})")
     return img_urls
