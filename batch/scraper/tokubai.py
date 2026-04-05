@@ -121,17 +121,20 @@ async def is_allowed(path: str) -> bool:
     return rp.can_fetch(_USER_AGENT, f"{TOKUBAI_BASE}{path}")
 
 
-async def fetch_store_prices(tokubai_store_id: str) -> list[dict]:
+async def fetch_store_prices(tokubai_store_id: str, store_url: str | None = None) -> list[dict]:
     """
-    トクバイの商品ページからテキスト価格を抽出する。
+    トクバイの店舗ページからテキスト価格を抽出する。
+    store_url が指定された場合はそちらを優先して使用する。
     """
     if not tokubai_store_id:
         print("  tokubai_id が未設定 → スキップ")
         return []
 
-    # 店舗ページURL: https://tokubai.co.jp/{store_id}
-    url = f"{TOKUBAI_BASE}/{tokubai_store_id}"
-    path = f"/{tokubai_store_id}"
+    # store_url（チェーン名スラッグ含む正確なURL）を優先使用
+    # 例: https://tokubai.co.jp/オオゼキ/8405
+    url = store_url if store_url else f"{TOKUBAI_BASE}/{tokubai_store_id}"
+    from urllib.parse import urlparse
+    path = urlparse(url).path
     if not await is_allowed(path):
         print(f"  robots.txt Disallow: {path} → スキップ")
         return []
@@ -198,14 +201,17 @@ async def fetch_store_prices(tokubai_store_id: str) -> list[dict]:
     return results
 
 
-async def fetch_flyer_image_urls(tokubai_store_id: str) -> list[str]:
+async def fetch_flyer_image_urls(tokubai_store_id: str, store_url: str | None = None) -> list[str]:
     """チラシ画像 URL の一覧を取得する（OCR 対象リスト作成用）"""
     if not tokubai_store_id:
         return []
 
-    # チラシ一覧URL: https://tokubai.co.jp/{store_id}/leaflets/
-    url = f"{TOKUBAI_BASE}/{tokubai_store_id}/leaflets/"
-    path = f"/{tokubai_store_id}/leaflets/"
+    # チラシ一覧: store_url をベースに /leaflets/ を付与
+    # 例: https://tokubai.co.jp/オオゼキ/8405 → https://tokubai.co.jp/オオゼキ/8405/leaflets/
+    base_url = store_url.rstrip("/") if store_url else f"{TOKUBAI_BASE}/{tokubai_store_id}"
+    url = f"{base_url}/leaflets/"
+    from urllib.parse import urlparse
+    path = urlparse(url).path
     if not await is_allowed(path):
         print(f"  robots.txt Disallow: {path} → スキップ")
         return []
