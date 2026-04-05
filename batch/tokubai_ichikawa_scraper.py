@@ -279,7 +279,7 @@ class TokubaiIchikawaScraper:
         meta = soup.find("meta", attrs={"property": "og:title"})
         if meta and meta.get("content"):
             title = str(meta["content"])
-            title = re.sub(r"のチラシ・特売情報.*$", "", title).strip()
+            title = re.sub(r"のチラシ[・・](特売|セール)情報.*$", "", title).strip()
             if title:
                 return title
         for i, line in enumerate(lines):
@@ -299,18 +299,33 @@ class TokubaiIchikawaScraper:
         return None
 
     def extract_address(self, lines: list[str]) -> str | None:
+        # 郵便番号は全角・半角ハイフン両方に対応
+        POSTAL_RE = re.compile(r"^〒[\d０-９]{3}[-－‒–][\d０-９]{4}\s*")
+
         for i, line in enumerate(lines):
             if line == "住所":
-                for candidate in lines[i + 1 : i + 6]:
-                    if candidate.startswith("〒") or "市川市" in candidate:
-                        candidate = re.sub(r"^〒\d{3}-\d{4}\s*", "", candidate)
+                for j, candidate in enumerate(lines[i + 1 : i + 8], start=i + 1):
+                    # 郵便番号だけの行 → 次の行が住所の場合
+                    if POSTAL_RE.fullmatch(candidate.strip() + " ") or re.fullmatch(
+                        r"〒[\d０-９]{3}[-－‒–][\d０-９]{4}", candidate.strip()
+                    ):
+                        # 次の行を住所として取得
+                        if j + 1 < len(lines):
+                            addr = lines[j + 1]
+                            addr = addr.replace("千葉県 ", "千葉県")
+                            return self.normalize_text(addr)
+                        continue
+                    # 郵便番号＋住所が同じ行
+                    if candidate.startswith("〒") or "市川市" in candidate or "千葉県" in candidate:
+                        candidate = POSTAL_RE.sub("", candidate)
                         candidate = candidate.replace("千葉県 ", "千葉県")
-                        return self.normalize_text(candidate)
-        text = "\n".join(lines)
-        m = re.search(r"住所\s*〒\d{3}-\d{4}\s*([^\n]+)", text)
-        if m:
-            candidate = re.sub(r"^〒\d{3}-\d{4}\s*", "", m.group(1))
-            return self.normalize_text(candidate)
+                        result = self.normalize_text(candidate)
+                        if result:
+                            return result
+        # フォールバック: 行川市 or 千葉県を含む行を探す
+        for line in lines:
+            if ("市川市" in line or "千葉県市川" in line) and len(line) > 5:
+                return self.normalize_text(line)
         return None
 
     def geocode_address(self, address: str | None) -> tuple[float | None, float | None]:
