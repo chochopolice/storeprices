@@ -3,20 +3,74 @@ name: Scrape Tokubai Stores
 on:
   workflow_dispatch:
     inputs:
-      prefecture_code:
-        description: '都道府県コード（例: 千葉県は 12、東京都は 13）'
+      prefecture:
+        description: '都道府県を選択'
         required: true
-        default: '12'
-        type: string
+        default: '12 千葉県'
+        type: choice
+        options:
+          - '01 北海道'
+          - '02 青森県'
+          - '03 岩手県'
+          - '04 宮城県'
+          - '05 秋田県'
+          - '06 山形県'
+          - '07 福島県'
+          - '08 茨城県'
+          - '09 栃木県'
+          - '10 群馬県'
+          - '11 埼玉県'
+          - '12 千葉県'
+          - '13 東京都'
+          - '14 神奈川県'
+          - '15 新潟県'
+          - '16 富山県'
+          - '17 石川県'
+          - '18 福井県'
+          - '19 山梨県'
+          - '20 長野県'
+          - '21 岐阜県'
+          - '22 静岡県'
+          - '23 愛知県'
+          - '24 三重県'
+          - '25 滋賀県'
+          - '26 京都府'
+          - '27 大阪府'
+          - '28 兵庫県'
+          - '29 奈良県'
+          - '30 和歌山県'
+          - '31 鳥取県'
+          - '32 島根県'
+          - '33 岡山県'
+          - '34 広島県'
+          - '35 山口県'
+          - '36 徳島県'
+          - '37 香川県'
+          - '38 愛媛県'
+          - '39 高知県'
+          - '40 福岡県'
+          - '41 佐賀県'
+          - '42 長崎県'
+          - '43 熊本県'
+          - '44 大分県'
+          - '45 宮崎県'
+          - '46 鹿児島県'
+          - '47 沖縄県'
       city_name:
-        description: '市区町村名（例: 市川市、港区）'
+        description: '市区町村名（例: 市川市、港区、大阪市北区）'
         required: true
         default: '市川市'
         type: string
+      dry_run:
+        description: 'DRY RUN（確認だけ・Supabase に書き込まない）'
+        required: false
+        default: 'true'
+        type: choice
+        options: ['true', 'false']
       limit:
         description: 'テスト用。先頭から何件まで取得するか（空欄で全件）'
         required: false
-        default: '100'
+        default: '5'
         type: string
       sleep:
         description: 'HTTPリクエスト間の待機秒数'
@@ -26,7 +80,7 @@ on:
       max_pages:
         description: '一覧ページの最大巡回ページ数'
         required: false
-        default: '10'
+        default: '100'
         type: string
 
 jobs:
@@ -57,8 +111,10 @@ jobs:
         run: |
           set -euo pipefail
 
+          PREF_CODE="$(printf '%s' '${{ inputs.prefecture }}' | awk '{print $1}')"
+
           CMD=(python tokubai_ichikawa_scraper.py
-            --prefecture-code "${{ inputs.prefecture_code }}"
+            --prefecture-code "$PREF_CODE"
             --city-name "${{ inputs.city_name }}"
             --sleep "${{ inputs.sleep }}"
             --max-pages "${{ inputs.max_pages }}")
@@ -71,8 +127,6 @@ jobs:
             CMD+=(--dry-run)
           fi
 
-          printf 'Run: '
-          printf '%q ' "${CMD[@]}"
+          printf 'Run: %q ' "${CMD[@]}"
           printf '\n'
-
           "${CMD[@]}"
