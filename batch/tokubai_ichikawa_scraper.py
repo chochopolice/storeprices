@@ -1,33 +1,29 @@
 #!/usr/bin/env python3
 """
-Scrape Tokubai store pages for Ichikawa City (Chiba) and output rows matching:
+Scrape Tokubai store pages for a selected city and upsert into Supabase.
 
+Output row shape:
 id,chain_id,name,type,lat,lng,address,store_code,created_at
 
 Notes
 -----
-- The script starts from the Ichikawa city page and crawls paginated store-list pages.
-- For each discovered store detail page, it extracts:
+- The target city page is built from:
+  https://tokubai.co.jp/prefectures/{prefecture_code}/cities/{city_name}
+- For each discovered store detail page, the script extracts:
   - name
   - type/category
   - address
+  - lat/lng (prefer Google Maps link on the page; fallback geocoding is optional)
   - store_code (numeric ID in the URL)
-- Optional geocoding uses Nominatim (OpenStreetMap) with a 1-second delay and a custom user-agent.
 - chain_id is generated deterministically from the chain slug/name via UUIDv5.
 - id is generated per row via UUIDv4.
-
-Usage example
--------------
-python tokubai_ichikawa_scraper.py \
-  --template stores_rows.csv \
-  --output tokubai_ichikawa_stores.csv \
-  --geocode
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 import time
@@ -36,12 +32,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
-from urllib.parse import unquote, urljoin, urlparse
+from urllib.parse import quote, unquote, urljoin, urlparse
 
-import os
-from pathlib import Path
-
-import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
@@ -55,10 +47,6 @@ except Exception:
     RateLimiter = None
 
 BASE = "https://tokubai.co.jp"
-CITY_URL = (
-    "https://tokubai.co.jp/prefectures/12/cities/"
-    "%E5%B8%82%E5%B7%9D%E5%B8%82"
-)
 DEFAULT_COLUMNS = [
     "id",
     "chain_id",
@@ -71,7 +59,6 @@ DEFAULT_COLUMNS = [
     "created_at",
 ]
 
-# Covers categories shown on the Tokubai Ichikawa city page.
 KNOWN_TYPES = [
     "スーパー・食料品店",
     "ドラッグストア",
@@ -138,6 +125,7 @@ KNOWN_TYPES = [
 ]
 
 
+
 @dataclass
 class StoreRecord:
     id: str
@@ -164,15 +152,24 @@ class StoreRecord:
         }
 
 
-class TokubaiIchikawaScraper:
+def build_city_url(prefecture_code: str | int, city_name: str) -> str:
+    city = city_name.strip()
+    if not city:
+        raise ValueError("city_name is empty.")
+    return f"{BASE}/prefectures/{str(prefecture_code).strip()}/cities/{quote(city, safe='')}"
+
+
+class TokubaiCityScraper:
     def __init__(
         self,
+        city_url: str,
         sleep_seconds: float = 0.8,
         timeout: int = 20,
         geocode: bool = False,
         geocode_cache_path: str | None = None,
         max_pages: int = 100,
     ) -> None:
+        self.city_url = city_url
         self.sleep_seconds = sleep_seconds
         self.timeout = timeout
         self.max_pages = max_pages
@@ -180,7 +177,7 @@ class TokubaiIchikawaScraper:
         self.session.headers.update(
             {
                 "User-Agent": (
-                    "tokubai-ichikawa-scraper/1.0 "
+                    "tokubai-city-scraper/1.0 "
                     "(contact: replace-with-your-email@example.com)"
                 ),
                 "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
@@ -191,7 +188,9 @@ class TokubaiIchikawaScraper:
         self.geocode_cache: dict[str, dict[str, float | None]] = {}
         if self.geocode_cache_path and self.geocode_cache_path.exists():
             try:
-                self.geocode_cache = json.loads(self.geocode_cache_path.read_text(encoding="utf-8"))
+                self.geocode_cache = json.loads(
+                    self.geocode_cache_path.read_text(encoding="utf-8")
+                )
             except Exception:
                 self.geocode_cache = {}
         self._geolocator = None
@@ -237,7 +236,6 @@ class TokubaiIchikawaScraper:
         path = urlparse(href).path
         if path.startswith("/prefectures/") or path.startswith("/transit/"):
             return False
-        # detail pages look like /{chain}/{numeric_id}
         if not re.search(r"^/[^/]+/\d+/?$", path):
             return False
         banned_parts = (
@@ -252,7 +250,7 @@ class TokubaiIchikawaScraper:
     def iter_store_urls(self) -> Iterable[str]:
         seen_codes: set[str] = set()
         for page in range(1, self.max_pages + 1):
-            url = CITY_URL if page == 1 else f"{CITY_URL}?page={page}"
+            url = self.city_url if page == 1 else f"{self.city_url}?page={page}"
             soup = self.fetch_soup(url)
             found_this_page: list[str] = []
             for a in soup.select("a[href]"):
@@ -304,19 +302,16 @@ class TokubaiIchikawaScraper:
         return None
 
     def extract_address(self, soup: BeautifulSoup) -> str | None:
-        """div.address の a タグテキストから住所を取得する"""
         tag = soup.select_one("div.address a")
         if tag:
             return self.normalize_text(tag.get_text(strip=True))
         return None
 
     def extract_lat_lng_from_soup(self, soup: BeautifulSoup) -> tuple[float | None, float | None]:
-        """div.address の Google Maps URL から緯度経度を取得（ジオコーディング不要）"""
         tag = soup.select_one("div.address a[href]")
         if not tag:
             return None, None
         href = tag.get("href", "")
-        # 例: https://www.google.com/maps/@35.7296841,139.9284692,18z?q=35.7296841,139.9284692
         m = re.search(r"[?&]q=([-\d.]+),([-\d.]+)", href)
         if not m:
             m = re.search(r"@([-\d.]+),([-\d.]+)", href)
@@ -326,6 +321,7 @@ class TokubaiIchikawaScraper:
             except ValueError:
                 pass
         return None, None
+
     def geocode_address(self, address: str | None) -> tuple[float | None, float | None]:
         if not address or not self.geocode_enabled or self._geocode_func is None:
             return None, None
@@ -353,7 +349,6 @@ class TokubaiIchikawaScraper:
         chain_name = self.extract_chain_name_from_url(url)
         address = self.extract_address(soup)
         lat, lng = self.extract_lat_lng_from_soup(soup)
-        # geocode_address は address が取れなかった場合のフォールバック
         if lat is None and address:
             lat, lng = self.geocode_address(address)
         return StoreRecord(
@@ -384,31 +379,23 @@ class TokubaiIchikawaScraper:
 
 
 def upsert_to_supabase(supabase, rows: list[dict]) -> tuple[int, int]:
-    """
-    stores テーブルに upsert する。
-    store_code が同じ行は更新、新規は insert。
-    lat/lng が None の行はスキップ。
-    戻り値: (成功件数, スキップ件数)
-    """
     inserted = skipped = 0
     for row in rows:
-        # 座標がない or 店舗名がないものはスキップ
         if not row.get("lat") or not row.get("lng") or not row.get("name"):
             print(f"  SKIP（座標/名前なし）: {row.get('store_code')} {row.get('name')}")
             skipped += 1
             continue
 
         record = {
-            "name":       row["name"],
-            "type":       row.get("type"),
-            "lat":        row["lat"],
-            "lng":        row["lng"],
-            "address":    row.get("address"),
+            "name": row["name"],
+            "type": row.get("type"),
+            "lat": row["lat"],
+            "lng": row["lng"],
+            "address": row.get("address"),
             "store_code": str(row["store_code"]),
         }
 
         try:
-            # store_code で既存レコードを確認
             existing = (
                 supabase.table("stores")
                 .select("id")
@@ -416,13 +403,11 @@ def upsert_to_supabase(supabase, rows: list[dict]) -> tuple[int, int]:
                 .execute()
             )
             if existing.data:
-                # 既存レコードを更新
                 supabase.table("stores").update(record).eq(
                     "store_code", record["store_code"]
                 ).execute()
                 print(f"  UPDATE: {record['store_code']} {record['name']}")
             else:
-                # 新規 insert
                 supabase.table("stores").insert(record).execute()
                 print(f"  INSERT: {record['store_code']} {record['name']}")
             inserted += 1
@@ -436,16 +421,28 @@ def upsert_to_supabase(supabase, rows: list[dict]) -> tuple[int, int]:
 def main() -> int:
     load_dotenv(Path(__file__).parent / ".env")
 
-    parser = argparse.ArgumentParser(description="Scrape Tokubai Ichikawa store data")
-    parser.add_argument("--sleep",     type=float, default=1.0)
-    parser.add_argument("--timeout",   type=int,   default=20)
-    parser.add_argument("--max-pages", type=int,   default=100)
-    parser.add_argument("--limit",     type=int,   help="テスト用: 先頭N件のみ取得")
-    parser.add_argument("--dry-run",   action="store_true",
-                        help="Supabase に書き込まず結果だけ表示する")
+    parser = argparse.ArgumentParser(description="Scrape Tokubai city store data")
+    parser.add_argument("--prefecture-code", type=str, required=True, help="例: 12")
+    parser.add_argument("--city-name", type=str, required=True, help="例: 市川市")
+    parser.add_argument("--sleep", type=float, default=1.0)
+    parser.add_argument("--timeout", type=int, default=20)
+    parser.add_argument("--max-pages", type=int, default=100)
+    parser.add_argument("--limit", type=int, help="テスト用: 先頭N件のみ取得")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Supabase に書き込まず結果だけ表示する",
+    )
     args = parser.parse_args()
 
-    # Supabase 接続
+    try:
+        city_url = build_city_url(args.prefecture_code, args.city_name)
+    except ValueError as e:
+        print(f"❌ {e}")
+        return 1
+
+    print(f"対象URL: {city_url}")
+
     supabase_url = os.environ.get("SUPABASE_URL", "")
     supabase_key = os.environ.get("SUPABASE_SERVICE_KEY", "")
     if not supabase_url or not supabase_key:
@@ -457,8 +454,8 @@ def main() -> int:
     if args.dry_run:
         print("=== DRY RUN モード（Supabase には書き込みません）===\n")
 
-    # スクレイピング実行
-    scraper = TokubaiIchikawaScraper(
+    scraper = TokubaiCityScraper(
+        city_url=city_url,
         sleep_seconds=args.sleep,
         timeout=args.timeout,
         max_pages=args.max_pages,
@@ -468,11 +465,12 @@ def main() -> int:
 
     if args.dry_run:
         for r in rows:
-            print(f"  {r.get('store_code'):>8}  {r.get('name')}  {r.get('address')}  "
-                  f"({r.get('lat')}, {r.get('lng')})")
+            print(
+                f"  {r.get('store_code'):>8}  {r.get('name')}  "
+                f"{r.get('address')}  ({r.get('lat')}, {r.get('lng')})"
+            )
         return 0
 
-    # Supabase に書き込み
     print("\nSupabase に書き込み中...")
     ok, ng = upsert_to_supabase(supabase, rows)
     print(f"\n完了: 登録/更新 {ok} 件 / スキップ {ng} 件")
