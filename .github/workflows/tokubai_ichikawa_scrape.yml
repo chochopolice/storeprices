@@ -3,18 +3,16 @@ name: Scrape Tokubai Ichikawa Stores
 on:
   workflow_dispatch:
     inputs:
-      geocode:
-        description: '住所から緯度経度を取得する（Nominatim）'
-        required: true
-        default: 'false'
+      dry_run:
+        description: 'DRY RUN（確認だけ・Supabase に書き込まない）'
+        required: false
+        default: 'true'
         type: choice
-        options:
-          - 'false'
-          - 'true'
+        options: ['true', 'false']
       limit:
         description: 'テスト用。先頭から何件まで取得するか（空欄で全件）'
         required: false
-        default: ''
+        default: '5'
         type: string
       sleep:
         description: 'HTTPリクエスト間の待機秒数'
@@ -31,15 +29,13 @@ jobs:
   scrape:
     runs-on: ubuntu-latest
     timeout-minutes: 90
-    permissions:
-      contents: read
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4        # v6→v4 に修正
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v5    # v6→v5 に修正
+        uses: actions/setup-python@v5
         with:
           python-version: '3.12'
           cache: 'pip'
@@ -48,48 +44,23 @@ jobs:
       - name: Install dependencies
         run: pip install -r batch/requirements.txt
 
-      - name: Prepare output directory
-        run: mkdir -p batch/output
-
       - name: Run scraper
         working-directory: batch
-        shell: bash
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: |
-          set -euo pipefail
-
-          OUTPUT_FILE="output/tokubai_ichikawa_stores.csv"
-
-          CMD=(python tokubai_ichikawa_scraper.py \
-            --template ../stores_rows.csv \
-            --output "$OUTPUT_FILE" \
-            --sleep "${{ inputs.sleep }}" \
+          CMD=(python tokubai_ichikawa_scraper.py
+            --sleep "${{ inputs.sleep }}"
             --max-pages "${{ inputs.max_pages }}")
 
           if [ "${{ inputs.limit }}" != "" ]; then
             CMD+=(--limit "${{ inputs.limit }}")
           fi
 
-          if [ "${{ inputs.geocode }}" = "true" ]; then
-            CMD+=(--geocode --geocode-cache output/geocode_cache.json)
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            CMD+=(--dry-run)
           fi
 
-          printf 'Run command: '
-          printf '%q ' "${CMD[@]}"
-          printf '\n'
-
+          printf 'Run: %s\n' "${CMD[*]}"
           "${CMD[@]}"
-
-      - name: Upload CSV artifact
-        uses: actions/upload-artifact@v4  # v6→v4 に修正
-        with:
-          name: tokubai-ichikawa-csv
-          path: batch/output/tokubai_ichikawa_stores.csv
-          if-no-files-found: error
-
-      - name: Upload geocode cache artifact
-        if: ${{ inputs.geocode == 'true' }}
-        uses: actions/upload-artifact@v4  # v6→v4 に修正
-        with:
-          name: tokubai-ichikawa-geocode-cache
-          path: batch/output/geocode_cache.json
-          if-no-files-found: warn
