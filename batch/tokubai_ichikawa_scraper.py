@@ -38,9 +38,14 @@ from pathlib import Path
 from typing import Iterable
 from urllib.parse import unquote, urljoin, urlparse
 
+import os
+from pathlib import Path
+
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
+from dotenv import load_dotenv
+from supabase import create_client
 
 try:
     from geopy.extra.rate_limiter import RateLimiter
@@ -378,54 +383,99 @@ class TokubaiIchikawaScraper:
         return rows
 
 
-def load_template_columns(template_path: str | None) -> list[str]:
-    if not template_path:
-        return DEFAULT_COLUMNS
-    df = pd.read_csv(template_path, nrows=0)
-    cols = list(df.columns)
-    return cols if cols else DEFAULT_COLUMNS
+def upsert_to_supabase(supabase, rows: list[dict]) -> tuple[int, int]:
+    """
+    stores テーブルに upsert する。
+    store_code が同じ行は更新、新規は insert。
+    lat/lng が None の行はスキップ。
+    戻り値: (成功件数, スキップ件数)
+    """
+    inserted = skipped = 0
+    for row in rows:
+        # 座標がない or 店舗名がないものはスキップ
+        if not row.get("lat") or not row.get("lng") or not row.get("name"):
+            print(f"  SKIP（座標/名前なし）: {row.get('store_code')} {row.get('name')}")
+            skipped += 1
+            continue
 
+        record = {
+            "name":       row["name"],
+            "type":       row.get("type"),
+            "lat":        row["lat"],
+            "lng":        row["lng"],
+            "address":    row.get("address"),
+            "store_code": str(row["store_code"]),
+        }
 
-def save_csv(rows: list[dict], output_path: str, columns: list[str]) -> None:
-    df = pd.DataFrame(rows)
-    for col in columns:
-        if col not in df.columns:
-            df[col] = pd.NA
-    df = df[columns]
-    df.to_csv(output_path, index=False, encoding="utf-8-sig")
+        try:
+            # store_code で既存レコードを確認
+            existing = (
+                supabase.table("stores")
+                .select("id")
+                .eq("store_code", record["store_code"])
+                .execute()
+            )
+            if existing.data:
+                # 既存レコードを更新
+                supabase.table("stores").update(record).eq(
+                    "store_code", record["store_code"]
+                ).execute()
+                print(f"  UPDATE: {record['store_code']} {record['name']}")
+            else:
+                # 新規 insert
+                supabase.table("stores").insert(record).execute()
+                print(f"  INSERT: {record['store_code']} {record['name']}")
+            inserted += 1
+        except Exception as e:
+            print(f"  ERROR: {record['store_code']} {record['name']} :: {e}")
+            skipped += 1
+
+    return inserted, skipped
 
 
 def main() -> int:
+    load_dotenv(Path(__file__).parent / ".env")
+
     parser = argparse.ArgumentParser(description="Scrape Tokubai Ichikawa store data")
-    parser.add_argument("--template", help="Existing CSV to copy column order from")
-    parser.add_argument("--output", required=True, help="Output CSV path")
-    parser.add_argument("--sleep", type=float, default=0.8, help="Delay between requests")
-    parser.add_argument("--timeout", type=int, default=20, help="HTTP timeout in seconds")
-    parser.add_argument("--max-pages", type=int, default=100, help="Max city list pages to scan")
-    parser.add_argument("--limit", type=int, help="Only scrape the first N stores (for testing)")
-    parser.add_argument(
-        "--geocode",
-        action="store_true",
-        help="Geocode addresses via Nominatim (OpenStreetMap)",
-    )
-    parser.add_argument(
-        "--geocode-cache",
-        default="geocode_cache.json",
-        help="Path to JSON cache for geocoding results",
-    )
+    parser.add_argument("--sleep",     type=float, default=1.0)
+    parser.add_argument("--timeout",   type=int,   default=20)
+    parser.add_argument("--max-pages", type=int,   default=100)
+    parser.add_argument("--limit",     type=int,   help="テスト用: 先頭N件のみ取得")
+    parser.add_argument("--dry-run",   action="store_true",
+                        help="Supabase に書き込まず結果だけ表示する")
     args = parser.parse_args()
 
-    columns = load_template_columns(args.template)
+    # Supabase 接続
+    supabase_url = os.environ.get("SUPABASE_URL", "")
+    supabase_key = os.environ.get("SUPABASE_SERVICE_KEY", "")
+    if not supabase_url or not supabase_key:
+        print("❌  SUPABASE_URL / SUPABASE_SERVICE_KEY が未設定です")
+        return 1
+    supabase = create_client(supabase_url, supabase_key)
+    print("✓ Supabase 接続OK")
+
+    if args.dry_run:
+        print("=== DRY RUN モード（Supabase には書き込みません）===\n")
+
+    # スクレイピング実行
     scraper = TokubaiIchikawaScraper(
         sleep_seconds=args.sleep,
         timeout=args.timeout,
-        geocode=args.geocode,
-        geocode_cache_path=args.geocode_cache if args.geocode else None,
         max_pages=args.max_pages,
     )
     rows = scraper.scrape(limit=args.limit)
-    save_csv(rows, args.output, columns)
-    print(f"Saved {len(rows)} rows to {args.output}")
+    print(f"\n取得完了: {len(rows)} 件")
+
+    if args.dry_run:
+        for r in rows:
+            print(f"  {r.get('store_code'):>8}  {r.get('name')}  {r.get('address')}  "
+                  f"({r.get('lat')}, {r.get('lng')})")
+        return 0
+
+    # Supabase に書き込み
+    print("\nSupabase に書き込み中...")
+    ok, ng = upsert_to_supabase(supabase, rows)
+    print(f"\n完了: 登録/更新 {ok} 件 / スキップ {ng} 件")
     return 0
 
 
