@@ -136,6 +136,7 @@ class StoreRecord:
     lng: float | None
     address: str | None
     store_code: str
+    store_url: str | None
     created_at: str
 
     def to_dict(self) -> dict:
@@ -148,6 +149,7 @@ class StoreRecord:
             "lng": self.lng,
             "address": self.address,
             "store_code": self.store_code,
+            "store_url": self.store_url,
             "created_at": self.created_at,
         }
 
@@ -360,6 +362,7 @@ class TokubaiCityScraper:
             lng=lng,
             address=address,
             store_code=store_code,
+            store_url=url,
             created_at=datetime.now(timezone.utc).isoformat(),
         )
 
@@ -387,12 +390,13 @@ def upsert_to_supabase(supabase, rows: list[dict]) -> tuple[int, int]:
             continue
 
         record = {
-            "name": row["name"],
-            "type": row.get("type"),
-            "lat": row["lat"],
-            "lng": row["lng"],
-            "address": row.get("address"),
+            "name":       row["name"],
+            "type":       row.get("type"),
+            "lat":        row["lat"],
+            "lng":        row["lng"],
+            "address":    row.get("address"),
             "store_code": str(row["store_code"]),
+            "store_url":  row.get("store_url"),
         }
 
         try:
