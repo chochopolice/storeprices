@@ -279,7 +279,7 @@ class TokubaiIchikawaScraper:
         meta = soup.find("meta", attrs={"property": "og:title"})
         if meta and meta.get("content"):
             title = str(meta["content"])
-            title = re.sub(r"のチラシ[・・](特売|セール)情報.*$", "", title).strip()
+            title = re.sub(r"のチラシ[・・](特売|セール|クーポン)情報.*$", "", title).strip()
             if title:
                 return title
         for i, line in enumerate(lines):
@@ -298,36 +298,29 @@ class TokubaiIchikawaScraper:
                 return item
         return None
 
-    def extract_address(self, lines: list[str]) -> str | None:
-        # 郵便番号は全角・半角ハイフン両方に対応
-        POSTAL_RE = re.compile(r"^〒[\d０-９]{3}[-－‒–][\d０-９]{4}\s*")
-
-        for i, line in enumerate(lines):
-            if line == "住所":
-                for j, candidate in enumerate(lines[i + 1 : i + 8], start=i + 1):
-                    # 郵便番号だけの行 → 次の行が住所の場合
-                    if POSTAL_RE.fullmatch(candidate.strip() + " ") or re.fullmatch(
-                        r"〒[\d０-９]{3}[-－‒–][\d０-９]{4}", candidate.strip()
-                    ):
-                        # 次の行を住所として取得
-                        if j + 1 < len(lines):
-                            addr = lines[j + 1]
-                            addr = addr.replace("千葉県 ", "千葉県")
-                            return self.normalize_text(addr)
-                        continue
-                    # 郵便番号＋住所が同じ行
-                    if candidate.startswith("〒") or "市川市" in candidate or "千葉県" in candidate:
-                        candidate = POSTAL_RE.sub("", candidate)
-                        candidate = candidate.replace("千葉県 ", "千葉県")
-                        result = self.normalize_text(candidate)
-                        if result:
-                            return result
-        # フォールバック: 行川市 or 千葉県を含む行を探す
-        for line in lines:
-            if ("市川市" in line or "千葉県市川" in line) and len(line) > 5:
-                return self.normalize_text(line)
+    def extract_address(self, soup: BeautifulSoup) -> str | None:
+        """div.address の a タグテキストから住所を取得する"""
+        tag = soup.select_one("div.address a")
+        if tag:
+            return self.normalize_text(tag.get_text(strip=True))
         return None
 
+    def extract_lat_lng_from_soup(self, soup: BeautifulSoup) -> tuple[float | None, float | None]:
+        """div.address の Google Maps URL から緯度経度を取得（ジオコーディング不要）"""
+        tag = soup.select_one("div.address a[href]")
+        if not tag:
+            return None, None
+        href = tag.get("href", "")
+        # 例: https://www.google.com/maps/@35.7296841,139.9284692,18z?q=35.7296841,139.9284692
+        m = re.search(r"[?&]q=([-\d.]+),([-\d.]+)", href)
+        if not m:
+            m = re.search(r"@([-\d.]+),([-\d.]+)", href)
+        if m:
+            try:
+                return float(m.group(1)), float(m.group(2))
+            except ValueError:
+                pass
+        return None, None
     def geocode_address(self, address: str | None) -> tuple[float | None, float | None]:
         if not address or not self.geocode_enabled or self._geocode_func is None:
             return None, None
@@ -353,8 +346,11 @@ class TokubaiIchikawaScraper:
         lines = self.lines_from_soup(soup)
         store_code = self.extract_store_code(url) or ""
         chain_name = self.extract_chain_name_from_url(url)
-        address = self.extract_address(lines)
-        lat, lng = self.geocode_address(address)
+        address = self.extract_address(soup)
+        lat, lng = self.extract_lat_lng_from_soup(soup)
+        # geocode_address は address が取れなかった場合のフォールバック
+        if lat is None and address:
+            lat, lng = self.geocode_address(address)
         return StoreRecord(
             id=str(uuid.uuid4()),
             chain_id=str(uuid.uuid5(uuid.NAMESPACE_DNS, chain_name)) if chain_name else None,
