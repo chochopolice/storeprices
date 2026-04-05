@@ -41,7 +41,7 @@ async def main() -> None:
     target_city = os.environ.get("TARGET_CITY", "").strip()
 
     print("\n[準備] Supabase から店舗一覧を取得...")
-    query = supabase.table("stores").select("id, name, store_code, address")
+    query = supabase.table("stores").select("id, name, store_code, address, store_url")
     if target_city:
         query = query.like("address", f"%{target_city}%")
     res = query.execute()
@@ -58,6 +58,7 @@ async def main() -> None:
             "tokubai_id":  s["store_code"],
             "supabase_id": s["id"],
             "name":        s["name"],
+            "store_url":   s.get("store_url"),
         }
         for s in stores_in_db
     ]
@@ -85,14 +86,14 @@ async def main() -> None:
     for store in store_mapping:
         print(f"\n  処理中: {store['name']} (tokubai_id={store['tokubai_id']})")
 
-        text_prices = await fetch_store_prices(store["tokubai_id"])
+        text_prices = await fetch_store_prices(store["tokubai_id"], store.get("store_url"))
         all_observations.extend([
             {**p, "store_id": store["supabase_id"], "source_type": "html_scrape"}
             for p in text_prices
         ])
 
         if enable_ocr:
-            img_urls = await fetch_flyer_image_urls(store["tokubai_id"])
+            img_urls = await fetch_flyer_image_urls(store["tokubai_id"], store.get("store_url"))
             await register_new_flyers(store["supabase_id"], img_urls)
 
     # ── Step 2: OCR ───────────────────────────────────────────────
