@@ -202,54 +202,83 @@ async def fetch_store_prices(tokubai_store_id: str, store_url: str | None = None
 
 
 async def fetch_flyer_image_urls(tokubai_store_id: str, store_url: str | None = None) -> list[str]:
-    """チラシ画像 URL の一覧を取得する（OCR 対象リスト作成用）"""
+    """
+    店舗ページからチラシ画像URLを取得する。
+
+    トクバイにはチラシ一覧ページが存在しないため、
+    店舗ページ内のチラシリンク → 個別チラシページ → 画像URL の順で取得する。
+    """
     if not tokubai_store_id:
         return []
 
-    # チラシ一覧: store_url をベースに /leaflets/ を付与
-    # 例: https://tokubai.co.jp/オオゼキ/8405 → https://tokubai.co.jp/オオゼキ/8405/leaflets/
     base_url = store_url.rstrip("/") if store_url else f"{TOKUBAI_BASE}/{tokubai_store_id}"
-    url = f"{base_url}/leaflets"
+
     from urllib.parse import urlparse
-    path = urlparse(url).path
+    path = urlparse(base_url).path
     if not await is_allowed(path):
         print(f"  robots.txt Disallow: {path} → スキップ")
         return []
 
-    headers = {"User-Agent": _USER_AGENT}
+    headers = {
+        "User-Agent":      _USER_AGENT,
+        "Accept-Language": "ja,en;q=0.9",
+    }
 
     async with httpx.AsyncClient(headers=headers, timeout=20, follow_redirects=True) as client:
+        # Step1: 店舗ページから /leaflets/{数字} 形式のリンクを収集
         try:
-            r = await client.get(url)
+            r = await client.get(base_url)
             r.raise_for_status()
         except Exception as e:
-            print(f"  チラシページ取得失敗: {e}")
+            print(f"  店舗ページ取得失敗: {e}")
             return []
 
-    soup = BeautifulSoup(r.text, "lxml")
-    img_urls: list[str] = []
+        soup = BeautifulSoup(r.text, "lxml")
 
-    # チラシ画像セレクタ（トクバイの実際の構造）
-    for img in soup.select(
-        ".leaflet img, .flyer img, [class*='leaflet'] img, [class*='Leaflet'] img"
-    ):
-        src = img.get("src") or img.get("data-src") or img.get("data-lazy-src")
-        if src and src.startswith("http") and not src.endswith(".gif"):
-            img_urls.append(src)
+        import re as _re
+        leaflet_urls: list[str] = []
+        for a in soup.find_all("a", href=True):
+            href = a["href"]
+            if _re.search(r"/leaflets/[0-9]+", href):
+                full = href if href.startswith("http") else f"{TOKUBAI_BASE}{href}"
+                if full not in leaflet_urls:
+                    leaflet_urls.append(full)
 
-    # チラシへのリンクから画像URLを補完
-    if not img_urls:
-        for a in soup.select(f"a[href*='/{tokubai_store_id}/leaflets/']"):
-            href = a.get("href", "")
-            if href and "/leaflets/" in href:
-                img = a.select_one("img")
-                if img:
-                    src = img.get("src") or img.get("data-src")
-                    if src and src.startswith("http"):
-                        img_urls.append(src)
+        if not leaflet_urls:
+            print(f"  チラシリンクなし ({base_url})")
+            return []
 
-    print(f"  チラシ画像: {len(img_urls)}枚 ({url})")
+        print(f"  チラシリンク: {len(leaflet_urls)}件")
+
+        # Step2: 各チラシページから画像URLを取得（最大5件）
+        img_urls: list[str] = []
+        for leaflet_url in leaflet_urls[:5]:
+            try:
+                r2 = await client.get(leaflet_url)
+                r2.raise_for_status()
+            except Exception:
+                continue
+
+            soup2 = BeautifulSoup(r2.text, "lxml")
+
+            # og:image が最も確実
+            og = soup2.find("meta", property="og:image")
+            if og and og.get("content", "").startswith("http"):
+                img_urls.append(og["content"])
+                continue
+
+            # 画像タグから探す
+            for img in soup2.select(
+                "[class*='leaflet'] img, [class*='flyer'] img, .main-image img"
+            ):
+                src = img.get("src") or img.get("data-src")
+                if src and src.startswith("http") and not src.endswith(".gif"):
+                    img_urls.append(src)
+                    break
+
+    print(f"  チラシ画像: {len(img_urls)}枚")
     return img_urls
+
 
 
 # ─────────────────────────────────────────────
