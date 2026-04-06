@@ -209,7 +209,7 @@ async def fetch_flyer_image_urls(tokubai_store_id: str, store_url: str | None = 
     # チラシ一覧: store_url をベースに /leaflets/ を付与
     # 例: https://tokubai.co.jp/オオゼキ/8405 → https://tokubai.co.jp/オオゼキ/8405/leaflets/
     base_url = store_url.rstrip("/") if store_url else f"{TOKUBAI_BASE}/{tokubai_store_id}"
-    url = f"{base_url}/leaflets/"
+    url = f"{base_url}/leaflets"
     from urllib.parse import urlparse
     path = urlparse(url).path
     if not await is_allowed(path):
