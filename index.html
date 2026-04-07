@@ -102,12 +102,20 @@
             <div class="receipt-grid">
               <label class="field">
                 <span>金額（円・必須）</span>
-                <input id="receiptPriceInput" type="number" min="1" step="1" placeholder="例: 98" required />
+                <input id="receiptPriceInput" type="number" min="1" step="1" placeholder="例: 98" required readonly />
               </label>
               <label class="field">
                 <span>購入日（必須）</span>
                 <input id="receiptPurchasedAtInput" type="date" required />
               </label>
+            </div>
+            <div class="receipt-match-box">
+              <button id="receiptMatchButton" type="button" class="button secondary">DBと照合して候補金額を表示</button>
+              <p id="receiptMatchResult" class="match-result"></p>
+              <div id="receiptMatchActions" class="match-actions hidden">
+                <button id="receiptPriceOkButton" type="button" class="button primary small">この金額でOK</button>
+                <button id="receiptPriceEditButton" type="button" class="button secondary small">金額を修正する</button>
+              </div>
             </div>
             <label class="field">
               <span>補足メモ（任意）</span>

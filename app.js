@@ -44,8 +44,14 @@ const receiptProductNameInputEl = document.getElementById('receiptProductNameInp
 const receiptPriceInputEl = document.getElementById('receiptPriceInput');
 const receiptPurchasedAtInputEl = document.getElementById('receiptPurchasedAtInput');
 const receiptNoteInputEl = document.getElementById('receiptNoteInput');
+const receiptMatchButtonEl = document.getElementById('receiptMatchButton');
+const receiptMatchResultEl = document.getElementById('receiptMatchResult');
+const receiptMatchActionsEl = document.getElementById('receiptMatchActions');
+const receiptPriceOkButtonEl = document.getElementById('receiptPriceOkButton');
+const receiptPriceEditButtonEl = document.getElementById('receiptPriceEditButton');
 const receiptSubmitButtonEl = document.getElementById('receiptSubmitButton');
 const receiptMessageEl = document.getElementById('receiptMessage');
+let receiptPriceConfirmed = false;
 
 // ===== 【機能1】カスタムアイコン定義 ================================
 
@@ -200,6 +206,25 @@ function isLooseMatch(query, target) {
   return qi === q.length;
 }
 
+function getTokenSet(text) {
+  return new Set(
+    normalize(text)
+      .split(/[^a-z0-9ぁ-んァ-ヶー一-龠]+/i)
+      .filter(Boolean)
+  );
+}
+
+function getTokenSimilarity(a, b) {
+  const setA = getTokenSet(a);
+  const setB = getTokenSet(b);
+  if (!setA.size || !setB.size) return 0;
+  let intersection = 0;
+  setA.forEach(token => {
+    if (setB.has(token)) intersection += 1;
+  });
+  return intersection / Math.max(setA.size, setB.size);
+}
+
 function formatDate(yyyymmdd) {
   const v = String(yyyymmdd || '');
   if (v.length !== 8) return v || '-';
@@ -211,6 +236,22 @@ function setReceiptMessage(text, type = 'error') {
   receiptMessageEl.textContent = text;
   receiptMessageEl.classList.remove('error', 'success');
   if (type) receiptMessageEl.classList.add(type);
+}
+
+function setMatchResult(text, type = 'neutral') {
+  if (!receiptMatchResultEl) return;
+  receiptMatchResultEl.textContent = text;
+  receiptMatchResultEl.classList.remove('success', 'error');
+  if (type === 'success' || type === 'error') {
+    receiptMatchResultEl.classList.add(type);
+  }
+}
+
+function resetMatchingState() {
+  receiptPriceConfirmed = false;
+  if (receiptPriceInputEl) receiptPriceInputEl.readOnly = true;
+  if (receiptMatchActionsEl) receiptMatchActionsEl.classList.add('hidden');
+  setMatchResult('');
 }
 
 function toIsoDateString(dateValue) {
@@ -243,6 +284,10 @@ async function submitReceipt(e) {
 
   if (!imageFile || !storeName || !storeAddress || !productName || !price || !purchasedAt) {
     setReceiptMessage('必須項目（画像・店舗名・住所・商品名・金額・購入日）を入力してください。', 'error');
+    return;
+  }
+  if (!receiptPriceConfirmed) {
+    setReceiptMessage('候補金額の「この金額でOK」または「金額を修正する」で確定してから投稿してください。', 'error');
     return;
   }
   if (!CONFIG.SUPABASE_URL || !CONFIG.SUPABASE_ANON_KEY) {
@@ -285,12 +330,96 @@ async function submitReceipt(e) {
     }
 
     receiptFormEl.reset();
+    resetMatchingState();
     setReceiptMessage('投稿ありがとうございました。DBに保存しました。', 'success');
   } catch (err) {
     setReceiptMessage(err.message || '投稿に失敗しました。', 'error');
   } finally {
     receiptSubmitButtonEl.disabled = false;
   }
+}
+
+async function findClosestPriceCandidate(storeName, productName) {
+  const { SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_VIEW } = CONFIG;
+  const headers = {
+    apikey: SUPABASE_ANON_KEY,
+    Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+  };
+  const params = new URLSearchParams({ select: 'store_name,group_name,price,valid_date' });
+  params.append('store_name', `ilike.*${storeName}*`);
+  params.append('group_name', `ilike.*${productName}*`);
+  params.append('order', 'valid_date.desc');
+  params.append('limit', '20');
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_VIEW}?${params.toString()}`, { headers });
+  if (!res.ok) throw new Error(`照合APIエラー (HTTP ${res.status})`);
+  const rows = await res.json();
+  if (!rows.length) return null;
+
+  const scored = rows
+    .map(row => {
+      const storeScore = getTokenSimilarity(storeName, row.store_name);
+      const productScore = getTokenSimilarity(productName, row.group_name);
+      const totalScore = storeScore * 0.45 + productScore * 0.55;
+      return { ...row, totalScore };
+    })
+    .sort((a, b) => b.totalScore - a.totalScore || String(b.valid_date).localeCompare(String(a.valid_date)));
+  return scored[0];
+}
+
+async function matchReceiptPriceWithDb() {
+  const imageFile = receiptImageInputEl.files?.[0];
+  const storeName = receiptStoreNameInputEl.value.trim();
+  const productName = receiptProductNameInputEl.value.trim();
+
+  if (!imageFile || !storeName || !productName) {
+    setMatchResult('照合には画像・店舗名・商品名の入力が必要です。', 'error');
+    return;
+  }
+  if (!CONFIG.SUPABASE_URL || !CONFIG.SUPABASE_ANON_KEY) {
+    setMatchResult('Supabase接続情報が未設定です。config.js を確認してください。', 'error');
+    return;
+  }
+
+  receiptMatchButtonEl.disabled = true;
+  setMatchResult('DB照合中です...');
+  receiptPriceConfirmed = false;
+  receiptPriceInputEl.readOnly = true;
+  receiptMatchActionsEl.classList.add('hidden');
+  setReceiptMessage('', null);
+
+  try {
+    const best = await findClosestPriceCandidate(storeName, productName);
+    if (!best) {
+      receiptPriceInputEl.value = '';
+      setMatchResult('DB上に近い商品が見つかりませんでした。金額を修正ボタンから手入力してください。', 'error');
+      receiptMatchActionsEl.classList.remove('hidden');
+      return;
+    }
+    receiptPriceInputEl.value = best.price;
+    setMatchResult(`候補: ${best.store_name} / ${best.group_name} / ${best.price}円（${formatDate(String(best.valid_date).replaceAll('-', ''))}時点）`, 'success');
+    receiptMatchActionsEl.classList.remove('hidden');
+  } catch (err) {
+    setMatchResult(err.message || '照合に失敗しました。', 'error');
+  } finally {
+    receiptMatchButtonEl.disabled = false;
+  }
+}
+
+function confirmMatchedPrice() {
+  if (!receiptPriceInputEl.value) {
+    setReceiptMessage('金額が未入力です。照合を実行するか、修正して入力してください。', 'error');
+    return;
+  }
+  receiptPriceInputEl.readOnly = true;
+  receiptPriceConfirmed = true;
+  setReceiptMessage('金額を確定しました。投稿できます。', 'success');
+}
+
+function enableManualPriceEdit() {
+  receiptPriceInputEl.readOnly = false;
+  receiptPriceInputEl.focus();
+  receiptPriceConfirmed = true;
+  setReceiptMessage('金額を修正してください。修正後はそのまま投稿できます。', 'success');
 }
 
 // ===== データ取得（データソース抽象化層）============================
@@ -556,6 +685,12 @@ storeTypeSelect.addEventListener('change', searchItems);
 sortSelect.addEventListener('change',      searchItems);
 radiusInput.addEventListener('change',     searchItems);
 if (receiptFormEl) receiptFormEl.addEventListener('submit', submitReceipt);
+if (receiptMatchButtonEl) receiptMatchButtonEl.addEventListener('click', matchReceiptPriceWithDb);
+if (receiptPriceOkButtonEl) receiptPriceOkButtonEl.addEventListener('click', confirmMatchedPrice);
+if (receiptPriceEditButtonEl) receiptPriceEditButtonEl.addEventListener('click', enableManualPriceEdit);
+if (receiptImageInputEl) receiptImageInputEl.addEventListener('change', resetMatchingState);
+if (receiptStoreNameInputEl) receiptStoreNameInputEl.addEventListener('input', resetMatchingState);
+if (receiptProductNameInputEl) receiptProductNameInputEl.addEventListener('input', resetMatchingState);
 
 // ===== 初期化 ======================================================
 window.addEventListener('load', async () => {

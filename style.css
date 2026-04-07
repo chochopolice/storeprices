@@ -77,6 +77,26 @@ textarea:focus {
   font-size: 11px;
   color: #6c7a95;
 }
+.receipt-match-box {
+  border: 1px solid #e2e9f5;
+  border-radius: 8px;
+  padding: 8px;
+  background: #f9fbff;
+}
+.match-result {
+  font-size: 12px;
+  min-height: 16px;
+  margin-top: 6px;
+  color: #4f5d75;
+}
+.match-result.success { color: #1e8449; }
+.match-result.error { color: #c0392b; }
+.match-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+.hidden { display: none; }
 .receipt-message {
   font-size: 12px;
   min-height: 16px;
@@ -123,6 +143,7 @@ textarea:focus {
 
 input[type="text"],
 input[type="number"],
+input[type="date"],
 select {
   padding: 7px 10px;
   border: 1.5px solid #d0d8e4;
@@ -135,9 +156,14 @@ select {
 }
 input[type="text"]:focus,
 input[type="number"]:focus,
+input[type="date"]:focus,
 select:focus {
   outline: none;
   border-color: #2e5fa3;
+}
+input[readonly] {
+  background: #f2f5fa;
+  color: #4f5d75;
 }
 
 /* ===== 地点指定エリア ===== */
