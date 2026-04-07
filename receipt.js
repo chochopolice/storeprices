@@ -239,6 +239,10 @@ async function submitReceipt(e) {
       setReceiptMessage('DB書き込み先が見つかりません。schema.sql を実行し、config.js の SUPABASE_RECEIPT_TABLE を確認してください。', 'error');
       return;
     }
+    if (err?.status === 401 || err?.status === 403) {
+      setReceiptMessage('DBへの書き込み権限がありません。schema.sql の GRANT/POLICY 設定を反映してください。', 'error');
+      return;
+    }
     setReceiptMessage(err.message || '投稿に失敗しました。', 'error');
   } finally {
     receiptSubmitButtonEl.disabled = false;

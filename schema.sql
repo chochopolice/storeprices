@@ -208,6 +208,10 @@ CREATE POLICY "service read receipt submissions" ON user_receipt_submissions
   FOR SELECT
   USING (auth.role() = 'service_role');
 
+-- anon/authenticated からレシート投稿テーブルへ INSERT を許可
+GRANT INSERT ON user_receipt_submissions TO anon;
+GRANT INSERT ON user_receipt_submissions TO authenticated;
+
 -- マテリアライズドビューへのアクセス（RLS 対象外）
 GRANT SELECT ON latest_store_product_prices TO anon;
 GRANT SELECT ON latest_store_product_prices TO authenticated;
