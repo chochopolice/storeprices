@@ -97,6 +97,23 @@ CREATE TABLE IF NOT EXISTS raw_price_observations (
 );
 
 -- ============================================================
+-- user_receipt_submissions（ユーザー投稿レシート）
+-- フロントから投稿された画像＋入力情報を保存
+-- ============================================================
+CREATE TABLE IF NOT EXISTS user_receipt_submissions (
+  id                     uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  store_name             text NOT NULL,
+  store_address          text NOT NULL,
+  product_name           text NOT NULL,
+  amount_yen             int  NOT NULL CHECK (amount_yen > 0),
+  purchased_on           date NOT NULL,
+  receipt_image_data_url text NOT NULL,
+  note                   text,
+  source_type            text NOT NULL DEFAULT 'user_receipt',
+  created_at             timestamptz DEFAULT now()
+);
+
+-- ============================================================
 -- normalized_prices（正規化後の価格）
 -- ============================================================
 CREATE TABLE IF NOT EXISTS normalized_prices (
@@ -172,6 +189,7 @@ ALTER TABLE product_aliases            ENABLE ROW LEVEL SECURITY;
 ALTER TABLE normalized_prices          ENABLE ROW LEVEL SECURITY;
 ALTER TABLE raw_price_observations     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE flyers                     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_receipt_submissions   ENABLE ROW LEVEL SECURITY;
 
 -- 読み取りは全員許可
 CREATE POLICY "anon read chains"             ON chains                 FOR SELECT USING (true);
@@ -183,6 +201,12 @@ CREATE POLICY "anon read normalized_prices"  ON normalized_prices      FOR SELEC
 -- raw データと flyers は書き込み専用（フロントからは読まない）
 CREATE POLICY "service only raw"    ON raw_price_observations FOR ALL USING (auth.role() = 'service_role');
 CREATE POLICY "service only flyers" ON flyers                 FOR ALL USING (auth.role() = 'service_role');
+CREATE POLICY "anon insert receipt submissions" ON user_receipt_submissions
+  FOR INSERT
+  WITH CHECK (true);
+CREATE POLICY "service read receipt submissions" ON user_receipt_submissions
+  FOR SELECT
+  USING (auth.role() = 'service_role');
 
 -- マテリアライズドビューへのアクセス（RLS 対象外）
 GRANT SELECT ON latest_store_product_prices TO anon;
