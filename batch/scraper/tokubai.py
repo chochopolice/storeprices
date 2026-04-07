@@ -261,20 +261,28 @@ async def fetch_flyer_image_urls(tokubai_store_id: str, store_url: str | None = 
 
             soup2 = BeautifulSoup(r2.text, "lxml")
 
-            # og:image が最も確実
-            og = soup2.find("meta", property="og:image")
-            if og and og.get("content", "").startswith("http"):
-                img_urls.append(og["content"])
-                continue
-
-            # 画像タグから探す
-            for img in soup2.select(
-                "[class*='leaflet'] img, [class*='flyer'] img, .main-image img"
-            ):
-                src = img.get("src") or img.get("data-src")
-                if src and src.startswith("http") and not src.endswith(".gif"):
-                    img_urls.append(src)
+            # image.tokubai.co.jp/images/bargain_office_leaflets/ を含む画像を探す
+            found = False
+            for img in soup2.find_all("img"):
+                for attr in ["src", "data-src", "data-lazy-src"]:
+                    src = img.get(attr, "")
+                    if "tokubai.co.jp/images/bargain_office_leaflets/" in src:
+                        img_urls.append(src)
+                        found = True
+                        break
+                if found:
                     break
+
+            # 見つからない場合は srcset も確認
+            if not found:
+                for img in soup2.find_all("img"):
+                    srcset = img.get("srcset", "")
+                    if "tokubai.co.jp/images/bargain_office_leaflets/" in srcset:
+                        # srcset の最初のURLを取得
+                        first = srcset.split(",")[0].strip().split(" ")[0]
+                        if first.startswith("http"):
+                            img_urls.append(first)
+                            break
 
     print(f"  チラシ画像: {len(img_urls)}枚")
     return img_urls
