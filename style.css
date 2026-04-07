@@ -34,6 +34,60 @@ main { padding: 20px 0 40px; }
 
 .side-column { display: flex; flex-direction: column; gap: 16px; }
 
+.submit-panel h2 {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1a3a5c;
+  margin-bottom: 4px;
+}
+.submit-lead {
+  font-size: 12px;
+  color: #4f5d75;
+  margin-bottom: 10px;
+}
+.receipt-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.receipt-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+@media (max-width: 420px) {
+  .receipt-grid { grid-template-columns: 1fr; }
+}
+textarea {
+  padding: 7px 10px;
+  border: 1.5px solid #d0d8e4;
+  border-radius: 6px;
+  font-size: 13px;
+  background: #fff;
+  color: #1a1a2e;
+  transition: border-color .15s;
+  width: 100%;
+  resize: vertical;
+}
+textarea:focus {
+  outline: none;
+  border-color: #2e5fa3;
+}
+.submit-hint {
+  font-size: 11px;
+  color: #6c7a95;
+}
+.receipt-message {
+  font-size: 12px;
+  min-height: 16px;
+}
+.receipt-message.error {
+  color: #c0392b;
+}
+.receipt-message.success {
+  color: #1e8449;
+}
+
 /* ===== panel ===== */
 .panel {
   background: #fff;

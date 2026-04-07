@@ -36,6 +36,16 @@ const filterStatusEl   = document.getElementById('filterStatus');
 const radiusStatusEl   = document.getElementById('radiusStatus');
 const resultCountEl    = document.getElementById('resultCount');
 const summaryTextEl    = document.getElementById('summaryText');
+const receiptFormEl    = document.getElementById('receiptForm');
+const receiptImageInputEl = document.getElementById('receiptImageInput');
+const receiptStoreNameInputEl = document.getElementById('receiptStoreNameInput');
+const receiptStoreAddressInputEl = document.getElementById('receiptStoreAddressInput');
+const receiptProductNameInputEl = document.getElementById('receiptProductNameInput');
+const receiptPriceInputEl = document.getElementById('receiptPriceInput');
+const receiptPurchasedAtInputEl = document.getElementById('receiptPurchasedAtInput');
+const receiptNoteInputEl = document.getElementById('receiptNoteInput');
+const receiptSubmitButtonEl = document.getElementById('receiptSubmitButton');
+const receiptMessageEl = document.getElementById('receiptMessage');
 
 // ===== 【機能1】カスタムアイコン定義 ================================
 
@@ -194,6 +204,93 @@ function formatDate(yyyymmdd) {
   const v = String(yyyymmdd || '');
   if (v.length !== 8) return v || '-';
   return `${v.slice(0,4)}/${v.slice(4,6)}/${v.slice(6,8)}`;
+}
+
+function setReceiptMessage(text, type = 'error') {
+  if (!receiptMessageEl) return;
+  receiptMessageEl.textContent = text;
+  receiptMessageEl.classList.remove('error', 'success');
+  if (type) receiptMessageEl.classList.add(type);
+}
+
+function toIsoDateString(dateValue) {
+  const v = String(dateValue || '').trim();
+  if (!v) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+  return '';
+}
+
+async function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('画像の読み取りに失敗しました。'));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function submitReceipt(e) {
+  e.preventDefault();
+  if (!receiptFormEl) return;
+
+  const imageFile = receiptImageInputEl.files?.[0];
+  const storeName = receiptStoreNameInputEl.value.trim();
+  const storeAddress = receiptStoreAddressInputEl.value.trim();
+  const productName = receiptProductNameInputEl.value.trim();
+  const price = Number(receiptPriceInputEl.value);
+  const purchasedAt = toIsoDateString(receiptPurchasedAtInputEl.value);
+  const note = receiptNoteInputEl.value.trim();
+
+  if (!imageFile || !storeName || !storeAddress || !productName || !price || !purchasedAt) {
+    setReceiptMessage('必須項目（画像・店舗名・住所・商品名・金額・購入日）を入力してください。', 'error');
+    return;
+  }
+  if (!CONFIG.SUPABASE_URL || !CONFIG.SUPABASE_ANON_KEY) {
+    setReceiptMessage('Supabase接続情報が未設定です。config.js を確認してください。', 'error');
+    return;
+  }
+  if (imageFile.size > 3 * 1024 * 1024) {
+    setReceiptMessage('画像サイズは3MB以下にしてください。', 'error');
+    return;
+  }
+
+  try {
+    setReceiptMessage('投稿中です...', null);
+    receiptSubmitButtonEl.disabled = true;
+
+    const imageDataUrl = await fileToDataUrl(imageFile);
+    const payload = {
+      store_name: storeName,
+      store_address: storeAddress,
+      product_name: productName,
+      amount_yen: Math.round(price),
+      purchased_on: purchasedAt,
+      receipt_image_data_url: imageDataUrl,
+      note: note || null,
+      source_type: 'user_receipt',
+    };
+
+    const res = await fetch(`${CONFIG.SUPABASE_URL}/rest/v1/user_receipt_submissions`, {
+      method: 'POST',
+      headers: {
+        apikey: CONFIG.SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${CONFIG.SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json',
+        Prefer: 'return=minimal',
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      throw new Error(`DB書き込みに失敗しました (HTTP ${res.status})`);
+    }
+
+    receiptFormEl.reset();
+    setReceiptMessage('投稿ありがとうございました。DBに保存しました。', 'success');
+  } catch (err) {
+    setReceiptMessage(err.message || '投稿に失敗しました。', 'error');
+  } finally {
+    receiptSubmitButtonEl.disabled = false;
+  }
 }
 
 // ===== データ取得（データソース抽象化層）============================
@@ -458,6 +555,7 @@ categorySelect.addEventListener('change',  searchItems);
 storeTypeSelect.addEventListener('change', searchItems);
 sortSelect.addEventListener('change',      searchItems);
 radiusInput.addEventListener('change',     searchItems);
+if (receiptFormEl) receiptFormEl.addEventListener('submit', submitReceipt);
 
 // ===== 初期化 ======================================================
 window.addEventListener('load', async () => {
