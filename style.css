@@ -348,3 +348,23 @@ input[readonly] {
 .hint-panel h2 { font-size: 14px; font-weight: 600; color: #1a3a5c; margin-bottom: 8px; }
 .hint-panel ul { padding-left: 18px; }
 .hint-panel li { font-size: 12px; color: #666; margin-bottom: 4px; }
+
+.nav-button {
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.receipt-page-main {
+  max-width: 760px;
+  padding-top: 20px;
+}
+
+.receipt-nav {
+  margin-bottom: 12px;
+}
+
+.receipt-standalone-panel {
+  margin-bottom: 24px;
+}

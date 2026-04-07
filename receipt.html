@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>レシート投稿 | 近所の最安商品マップ</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <h1>レシート投稿</h1>
+      <p>レシート画像をアップロードし、価格データを投稿できます。</p>
+    </div>
+  </header>
+
+  <main class="container receipt-page-main">
+    <nav class="receipt-nav">
+      <a class="button secondary nav-button" href="./index.html">検索ページへ戻る</a>
+    </nav>
+
+    <section class="panel submit-panel receipt-standalone-panel">
+      <h2>レシート投稿フォーム</h2>
+      <p class="submit-lead">まずレシート画像を読み込み、DB補完で入力候補を埋めてから投稿できます。</p>
+      <form id="receiptForm" class="receipt-form">
+        <label class="field">
+          <span>レシート画像（必須）</span>
+          <input id="receiptImageInput" type="file" accept="image/*" capture="environment" required />
+        </label>
+        <label class="field">
+          <span>店舗名（DB補完可）</span>
+          <input id="receiptStoreNameInput" type="text" placeholder="例: イオン 市川妙典店" />
+        </label>
+        <label class="field">
+          <span>店舗住所（DB補完可）</span>
+          <input id="receiptStoreAddressInput" type="text" placeholder="例: 千葉県市川市妙典5-3-1" />
+        </label>
+        <label class="field">
+          <span>商品名（DB補完可）</span>
+          <input id="receiptProductNameInput" type="text" placeholder="例: 絹豆腐 150g" />
+        </label>
+        <div class="receipt-grid">
+          <label class="field">
+            <span>金額（円・DB補完可）</span>
+            <input id="receiptPriceInput" type="number" min="1" step="1" placeholder="例: 98" readonly />
+          </label>
+          <label class="field">
+            <span>購入日（任意）</span>
+            <input id="receiptPurchasedAtInput" type="date" />
+          </label>
+        </div>
+        <div class="receipt-match-box">
+          <button id="receiptMatchButton" type="button" class="button secondary">DBと照合して入力候補を補完</button>
+          <p id="receiptMatchResult" class="match-result"></p>
+          <div id="receiptMatchActions" class="match-actions hidden">
+            <button id="receiptPriceOkButton" type="button" class="button primary small">この金額でOK</button>
+            <button id="receiptPriceEditButton" type="button" class="button secondary small">金額を修正する</button>
+          </div>
+        </div>
+        <label class="field">
+          <span>補足メモ（任意）</span>
+          <textarea id="receiptNoteInput" rows="2" placeholder="例: 特売・タイムセールなど"></textarea>
+        </label>
+        <p class="submit-hint">画像を先に投稿し、DB補完で埋まらない項目だけ追加入力してください。</p>
+        <button id="receiptSubmitButton" type="submit" class="button primary">レシートを投稿</button>
+        <p id="receiptMessage" class="receipt-message"></p>
+      </form>
+    </section>
+  </main>
+
+  <script src="./config.js"></script>
+  <script src="./receipt.js"></script>
+</body>
+</html>
