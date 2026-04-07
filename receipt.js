@@ -3,6 +3,7 @@ const receiptImageInputEl = document.getElementById('receiptImageInput');
 const receiptStoreNameInputEl = document.getElementById('receiptStoreNameInput');
 const receiptStoreAddressInputEl = document.getElementById('receiptStoreAddressInput');
 const receiptProductNameInputEl = document.getElementById('receiptProductNameInput');
+const receiptItemsInputEl = document.getElementById('receiptItemsInput');
 const receiptPriceInputEl = document.getElementById('receiptPriceInput');
 const receiptPurchasedAtInputEl = document.getElementById('receiptPurchasedAtInput');
 const receiptNoteInputEl = document.getElementById('receiptNoteInput');
@@ -101,6 +102,7 @@ function getCurrentReceiptDraft() {
     store_name: receiptStoreNameInputEl.value.trim(),
     store_address: receiptStoreAddressInputEl.value.trim(),
     product_name: receiptProductNameInputEl.value.trim(),
+    line_items_text: receiptItemsInputEl.value,
     amount_yen: receiptPriceInputEl.value.trim(),
     purchased_on: toIsoDateString(receiptPurchasedAtInputEl.value),
   };
@@ -111,6 +113,7 @@ function applyReceiptDraftToForm(draft) {
   if (draft.store_name && !receiptStoreNameInputEl.value.trim()) receiptStoreNameInputEl.value = draft.store_name;
   if (draft.store_address && !receiptStoreAddressInputEl.value.trim()) receiptStoreAddressInputEl.value = draft.store_address;
   if (draft.product_name && !receiptProductNameInputEl.value.trim()) receiptProductNameInputEl.value = draft.product_name;
+  if (draft.line_items_text && !receiptItemsInputEl.value.trim()) receiptItemsInputEl.value = draft.line_items_text;
   if (draft.amount_yen && !receiptPriceInputEl.value.trim()) receiptPriceInputEl.value = String(draft.amount_yen);
   if (draft.purchased_on && !receiptPurchasedAtInputEl.value) receiptPurchasedAtInputEl.value = draft.purchased_on;
 }
@@ -161,6 +164,7 @@ async function postReceiptPayload(payload) {
 
   let lastError = null;
   for (const table of candidateTables) {
+    let requestBody = payload;
     const res = await fetch(`${CONFIG.SUPABASE_URL}/rest/v1/${table}`, {
       method: 'POST',
       headers: {
@@ -169,12 +173,26 @@ async function postReceiptPayload(payload) {
         'Content-Type': 'application/json',
         Prefer: 'return=minimal',
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(requestBody),
     });
 
     if (res.ok) return { table };
 
     const errorText = await res.text().catch(() => '');
+    if (res.status === 400 && requestBody.line_items !== undefined && /line_items/i.test(errorText)) {
+      const { line_items, ...fallbackPayload } = requestBody;
+      const retryRes = await fetch(`${CONFIG.SUPABASE_URL}/rest/v1/${table}`, {
+        method: 'POST',
+        headers: {
+          apikey: CONFIG.SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${CONFIG.SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json',
+          Prefer: 'return=minimal',
+        },
+        body: JSON.stringify(fallbackPayload),
+      });
+      if (retryRes.ok) return { table };
+    }
     lastError = new Error(`DB書き込みに失敗しました (HTTP ${res.status})`);
     lastError.status = res.status;
     lastError.table = table;
@@ -186,6 +204,22 @@ async function postReceiptPayload(payload) {
   throw lastError || new Error('DB書き込みに失敗しました。');
 }
 
+function parseLineItems(text) {
+  return String(text || '')
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean)
+    .map(line => {
+      const [namePart, pricePart] = line.split(',');
+      const amount = Number(String(pricePart || '').replace(/[^\d]/g, ''));
+      return {
+        product_name: String(namePart || '').trim(),
+        amount_yen: Number.isFinite(amount) && amount > 0 ? Math.round(amount) : null,
+      };
+    })
+    .filter(item => item.product_name);
+}
+
 async function submitReceipt(e) {
   e.preventDefault();
 
@@ -193,6 +227,7 @@ async function submitReceipt(e) {
   const storeName = receiptStoreNameInputEl.value.trim();
   const storeAddress = receiptStoreAddressInputEl.value.trim();
   const productName = receiptProductNameInputEl.value.trim();
+  const lineItems = parseLineItems(receiptItemsInputEl.value);
   const priceRaw = receiptPriceInputEl.value.trim();
   const price = priceRaw ? Number(priceRaw) : null;
   const purchasedAt = toIsoDateString(receiptPurchasedAtInputEl.value);
@@ -220,6 +255,7 @@ async function submitReceipt(e) {
       store_name: storeName || null,
       store_address: storeAddress || null,
       product_name: productName || null,
+      line_items: lineItems.length ? lineItems : null,
       amount_yen: Number.isFinite(price) && price > 0 ? Math.round(price) : null,
       purchased_on: purchasedAt || null,
       receipt_image_data_url: imageDataUrl,
@@ -393,6 +429,7 @@ receiptProductNameInputEl.addEventListener('input', () => {
   resetMatchingState();
   persistReceiptDraft({ includeGlobal: true });
 });
+receiptItemsInputEl.addEventListener('input', () => persistReceiptDraft({ includeGlobal: true }));
 receiptPriceInputEl.addEventListener('input', () => persistReceiptDraft({ includeGlobal: true }));
 receiptPurchasedAtInputEl.addEventListener('change', () => persistReceiptDraft({ includeGlobal: true }));
 
