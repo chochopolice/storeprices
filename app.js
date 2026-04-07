@@ -118,12 +118,45 @@ function clearStoreMarkers() {
   storeMarkers = [];
 }
 
+// ===== 逆ジオコーディング（緯度経度 → 住所） ========================
+async function reverseGeocodeLatLng(lat, lng) {
+  const url = `https://nominatim.openstreetmap.org/reverse?` +
+    new URLSearchParams({
+      lat: String(lat),
+      lon: String(lng),
+      format: 'jsonv2',
+      zoom: '18',
+      'accept-language': 'ja',
+    });
+
+  const res = await fetch(url, {
+    headers: { 'User-Agent': 'PriceCompareMap/1.0' }
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+  const data = await res.json();
+  return data?.display_name || '';
+}
+
 // ===== 【機能3】地図クリックで起点設定 ==============================
-function onMapClick(e) {
+async function onMapClick(e) {
   const { lat, lng } = e.latlng;
-  const label = `地図で指定した地点 (${lat.toFixed(4)}, ${lng.toFixed(4)})`;
-  updateUserLocation(lat, lng, label, true);
-  addressInput.value = '';   // 住所入力欄はクリア
+  const fallbackLabel = `地図で指定した地点 (${lat.toFixed(4)}, ${lng.toFixed(4)})`;
+
+  messageEl.textContent = '地点の住所を取得中...';
+  try {
+    const address = await reverseGeocodeLatLng(lat, lng);
+    const label = address
+      ? `地図で指定: ${address}`
+      : fallbackLabel;
+    updateUserLocation(lat, lng, label, true);
+    addressInput.value = address || '';
+    messageEl.textContent = '';
+  } catch (err) {
+    updateUserLocation(lat, lng, fallbackLabel, true);
+    addressInput.value = '';
+    messageEl.textContent = `住所の取得に失敗したため座標で設定しました: ${err.message}`;
+  }
   searchItems();
 }
 
