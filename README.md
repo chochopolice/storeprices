@@ -71,6 +71,7 @@ const CONFIG = {
   DATA_SOURCE:       'supabase',          // ← 'json' から変更
   SUPABASE_URL:      'https://xxxx.supabase.co',
   SUPABASE_ANON_KEY: 'eyJ...',
+  SUPABASE_RECEIPT_TABLE: 'user_receipt_submissions', // レシート投稿の保存先
   // 他はそのまま
 };
 ```

@@ -378,6 +378,42 @@ async function fileToDataUrl(file) {
   });
 }
 
+async function postReceiptPayload(payload) {
+  const preferredTable = String(CONFIG.SUPABASE_RECEIPT_TABLE || 'user_receipt_submissions').trim();
+  const candidateTables = [
+    preferredTable,
+    'user_receipt_submissions',
+    'receipt_submissions',
+    'user_receipts',
+  ].filter((table, index, arr) => table && arr.indexOf(table) === index);
+
+  let lastError = null;
+  for (const table of candidateTables) {
+    const res = await fetch(`${CONFIG.SUPABASE_URL}/rest/v1/${table}`, {
+      method: 'POST',
+      headers: {
+        apikey: CONFIG.SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${CONFIG.SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json',
+        Prefer: 'return=minimal',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (res.ok) return { table };
+
+    const errorText = await res.text().catch(() => '');
+    lastError = new Error(`DB書き込みに失敗しました (HTTP ${res.status})`);
+    lastError.status = res.status;
+    lastError.table = table;
+    lastError.detail = errorText;
+    if (res.status !== 404) {
+      throw lastError;
+    }
+  }
+  throw lastError || new Error('DB書き込みに失敗しました。');
+}
+
 async function submitReceipt(e) {
   e.preventDefault();
   if (!receiptFormEl) return;
@@ -420,19 +456,7 @@ async function submitReceipt(e) {
       source_type: 'user_receipt',
     };
 
-    const res = await fetch(`${CONFIG.SUPABASE_URL}/rest/v1/user_receipt_submissions`, {
-      method: 'POST',
-      headers: {
-        apikey: CONFIG.SUPABASE_ANON_KEY,
-        Authorization: `Bearer ${CONFIG.SUPABASE_ANON_KEY}`,
-        'Content-Type': 'application/json',
-        Prefer: 'return=minimal',
-      },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) {
-      throw new Error(`DB書き込みに失敗しました (HTTP ${res.status})`);
-    }
+    await postReceiptPayload(payload);
 
     receiptFormEl.reset();
     currentReceiptFileKey = '';
@@ -440,6 +464,13 @@ async function submitReceipt(e) {
     setReceiptMessage('投稿ありがとうございました。DBに保存しました。', 'success');
     persistReceiptDraft({ includeGlobal: false });
   } catch (err) {
+    if (err?.status === 404) {
+      setReceiptMessage(
+        'DB書き込み先が見つかりません。schema.sql を実行し、config.js の SUPABASE_RECEIPT_TABLE を確認してください。',
+        'error'
+      );
+      return;
+    }
     setReceiptMessage(err.message || '投稿に失敗しました。', 'error');
   } finally {
     receiptSubmitButtonEl.disabled = false;
