@@ -52,6 +52,8 @@ const receiptPriceEditButtonEl = document.getElementById('receiptPriceEditButton
 const receiptSubmitButtonEl = document.getElementById('receiptSubmitButton');
 const receiptMessageEl = document.getElementById('receiptMessage');
 let receiptPriceConfirmed = false;
+const RECEIPT_DRAFT_STORAGE_KEY = 'receipt_form_draft_v1';
+let currentReceiptFileKey = '';
 
 // ===== 【機能1】カスタムアイコン定義 ================================
 
@@ -254,6 +256,79 @@ function resetMatchingState() {
   setMatchResult('');
 }
 
+function getReceiptFileKey(file) {
+  if (!file) return '';
+  return [file.name || '', file.size || 0, file.lastModified || 0].join('::');
+}
+
+function loadReceiptDraftMap() {
+  try {
+    const raw = localStorage.getItem(RECEIPT_DRAFT_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function saveReceiptDraftMap(map) {
+  try {
+    localStorage.setItem(RECEIPT_DRAFT_STORAGE_KEY, JSON.stringify(map));
+  } catch (_) {
+    // 端末容量やプライベートモード時は保存失敗しうるため握りつぶす
+  }
+}
+
+function getCurrentReceiptDraft() {
+  return {
+    store_name: receiptStoreNameInputEl?.value.trim() || '',
+    store_address: receiptStoreAddressInputEl?.value.trim() || '',
+    product_name: receiptProductNameInputEl?.value.trim() || '',
+    amount_yen: receiptPriceInputEl?.value.trim() || '',
+    purchased_on: toIsoDateString(receiptPurchasedAtInputEl?.value) || '',
+  };
+}
+
+function applyReceiptDraftToForm(draft) {
+  if (!draft) return;
+  if (receiptStoreNameInputEl && draft.store_name && !receiptStoreNameInputEl.value.trim()) {
+    receiptStoreNameInputEl.value = draft.store_name;
+  }
+  if (receiptStoreAddressInputEl && draft.store_address && !receiptStoreAddressInputEl.value.trim()) {
+    receiptStoreAddressInputEl.value = draft.store_address;
+  }
+  if (receiptProductNameInputEl && draft.product_name && !receiptProductNameInputEl.value.trim()) {
+    receiptProductNameInputEl.value = draft.product_name;
+  }
+  if (receiptPriceInputEl && draft.amount_yen && !receiptPriceInputEl.value.trim()) {
+    receiptPriceInputEl.value = String(draft.amount_yen);
+  }
+  if (receiptPurchasedAtInputEl && draft.purchased_on && !receiptPurchasedAtInputEl.value) {
+    receiptPurchasedAtInputEl.value = draft.purchased_on;
+  }
+}
+
+function persistReceiptDraft({ includeGlobal = false } = {}) {
+  const draftMap = loadReceiptDraftMap();
+  const currentDraft = getCurrentReceiptDraft();
+  if (currentReceiptFileKey) {
+    draftMap[currentReceiptFileKey] = currentDraft;
+  }
+  if (includeGlobal) {
+    draftMap.__latest = currentDraft;
+  }
+  saveReceiptDraftMap(draftMap);
+}
+
+function restoreDraftForSelectedFile() {
+  const selectedFile = receiptImageInputEl?.files?.[0];
+  currentReceiptFileKey = getReceiptFileKey(selectedFile);
+  const draftMap = loadReceiptDraftMap();
+  const matched = (currentReceiptFileKey && draftMap[currentReceiptFileKey]) || draftMap.__latest;
+  applyReceiptDraftToForm(matched);
+}
+
 function toIsoDateString(dateValue) {
   const v = String(dateValue || '').trim();
   if (!v) return '';
@@ -327,8 +402,10 @@ async function submitReceipt(e) {
     }
 
     receiptFormEl.reset();
+    currentReceiptFileKey = '';
     resetMatchingState();
     setReceiptMessage('投稿ありがとうございました。DBに保存しました。', 'success');
+    persistReceiptDraft({ includeGlobal: false });
   } catch (err) {
     setReceiptMessage(err.message || '投稿に失敗しました。', 'error');
   } finally {
@@ -435,6 +512,7 @@ async function matchReceiptPriceWithDb() {
     const missing = buildMissingFieldList();
     setMatchResult(`候補: ${best.store_name} / ${best.group_name} / ${best.price}円（${formatDate(String(best.valid_date).replaceAll('-', ''))}時点） / 未入力: ${missing.join('・') || 'なし'}`, missing.length ? 'error' : 'success');
     receiptMatchActionsEl.classList.remove('hidden');
+    persistReceiptDraft({ includeGlobal: true });
   } catch (err) {
     setMatchResult(err.message || '照合に失敗しました。', 'error');
   } finally {
@@ -725,14 +803,33 @@ if (receiptFormEl) receiptFormEl.addEventListener('submit', submitReceipt);
 if (receiptMatchButtonEl) receiptMatchButtonEl.addEventListener('click', matchReceiptPriceWithDb);
 if (receiptPriceOkButtonEl) receiptPriceOkButtonEl.addEventListener('click', confirmMatchedPrice);
 if (receiptPriceEditButtonEl) receiptPriceEditButtonEl.addEventListener('click', enableManualPriceEdit);
-if (receiptImageInputEl) receiptImageInputEl.addEventListener('change', resetMatchingState);
-if (receiptStoreNameInputEl) receiptStoreNameInputEl.addEventListener('input', resetMatchingState);
-if (receiptProductNameInputEl) receiptProductNameInputEl.addEventListener('input', resetMatchingState);
+if (receiptImageInputEl) {
+  receiptImageInputEl.addEventListener('change', () => {
+    resetMatchingState();
+    restoreDraftForSelectedFile();
+  });
+}
+if (receiptStoreNameInputEl) {
+  receiptStoreNameInputEl.addEventListener('input', () => {
+    resetMatchingState();
+    persistReceiptDraft({ includeGlobal: true });
+  });
+}
+if (receiptStoreAddressInputEl) receiptStoreAddressInputEl.addEventListener('input', () => persistReceiptDraft({ includeGlobal: true }));
+if (receiptProductNameInputEl) {
+  receiptProductNameInputEl.addEventListener('input', () => {
+    resetMatchingState();
+    persistReceiptDraft({ includeGlobal: true });
+  });
+}
+if (receiptPriceInputEl) receiptPriceInputEl.addEventListener('input', () => persistReceiptDraft({ includeGlobal: true }));
+if (receiptPurchasedAtInputEl) receiptPurchasedAtInputEl.addEventListener('change', () => persistReceiptDraft({ includeGlobal: true }));
 
 // ===== 初期化 ======================================================
 window.addEventListener('load', async () => {
   try {
     initMap();
+    applyReceiptDraftToForm(loadReceiptDraftMap().__latest);
     if (CONFIG.DATA_SOURCE === 'json') {
       await loadStoresFromJson();
       populateFilters();
