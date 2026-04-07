@@ -105,6 +105,7 @@ CREATE TABLE IF NOT EXISTS user_receipt_submissions (
   store_name             text,
   store_address          text,
   product_name           text,
+  line_items             jsonb,                  -- 任意: [{ product_name, amount_yen }]
   amount_yen             int CHECK (amount_yen > 0),
   purchased_on           date,
   receipt_image_data_url text NOT NULL,
