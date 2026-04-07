@@ -102,11 +102,11 @@ CREATE TABLE IF NOT EXISTS raw_price_observations (
 -- ============================================================
 CREATE TABLE IF NOT EXISTS user_receipt_submissions (
   id                     uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  store_name             text NOT NULL,
-  store_address          text NOT NULL,
-  product_name           text NOT NULL,
-  amount_yen             int  NOT NULL CHECK (amount_yen > 0),
-  purchased_on           date NOT NULL,
+  store_name             text,
+  store_address          text,
+  product_name           text,
+  amount_yen             int CHECK (amount_yen > 0),
+  purchased_on           date,
   receipt_image_data_url text NOT NULL,
   note                   text,
   source_type            text NOT NULL DEFAULT 'user_receipt',

@@ -278,16 +278,13 @@ async function submitReceipt(e) {
   const storeName = receiptStoreNameInputEl.value.trim();
   const storeAddress = receiptStoreAddressInputEl.value.trim();
   const productName = receiptProductNameInputEl.value.trim();
-  const price = Number(receiptPriceInputEl.value);
+  const priceRaw = receiptPriceInputEl.value.trim();
+  const price = priceRaw ? Number(priceRaw) : null;
   const purchasedAt = toIsoDateString(receiptPurchasedAtInputEl.value);
   const note = receiptNoteInputEl.value.trim();
 
-  if (!imageFile || !storeName || !storeAddress || !productName || !price || !purchasedAt) {
-    setReceiptMessage('必須項目（画像・店舗名・住所・商品名・金額・購入日）を入力してください。', 'error');
-    return;
-  }
-  if (!receiptPriceConfirmed) {
-    setReceiptMessage('候補金額の「この金額でOK」または「金額を修正する」で確定してから投稿してください。', 'error');
+  if (!imageFile) {
+    setReceiptMessage('レシート画像を選択してください。', 'error');
     return;
   }
   if (!CONFIG.SUPABASE_URL || !CONFIG.SUPABASE_ANON_KEY) {
@@ -305,11 +302,11 @@ async function submitReceipt(e) {
 
     const imageDataUrl = await fileToDataUrl(imageFile);
     const payload = {
-      store_name: storeName,
-      store_address: storeAddress,
-      product_name: productName,
-      amount_yen: Math.round(price),
-      purchased_on: purchasedAt,
+      store_name: storeName || null,
+      store_address: storeAddress || null,
+      product_name: productName || null,
+      amount_yen: Number.isFinite(price) && price > 0 ? Math.round(price) : null,
+      purchased_on: purchasedAt || null,
       receipt_image_data_url: imageDataUrl,
       note: note || null,
       source_type: 'user_receipt',
@@ -366,13 +363,23 @@ async function findClosestPriceCandidate(storeName, productName) {
   return scored[0];
 }
 
+function buildMissingFieldList() {
+  const missing = [];
+  if (!receiptStoreNameInputEl.value.trim()) missing.push('店舗名');
+  if (!receiptStoreAddressInputEl.value.trim()) missing.push('店舗住所');
+  if (!receiptProductNameInputEl.value.trim()) missing.push('商品名');
+  if (!receiptPriceInputEl.value.trim()) missing.push('金額');
+  if (!toIsoDateString(receiptPurchasedAtInputEl.value)) missing.push('購入日');
+  return missing;
+}
+
 async function matchReceiptPriceWithDb() {
   const imageFile = receiptImageInputEl.files?.[0];
   const storeName = receiptStoreNameInputEl.value.trim();
   const productName = receiptProductNameInputEl.value.trim();
 
-  if (!imageFile || !storeName || !productName) {
-    setMatchResult('照合には画像・店舗名・商品名の入力が必要です。', 'error');
+  if (!imageFile) {
+    setMatchResult('先にレシート画像を選択してください。', 'error');
     return;
   }
   if (!CONFIG.SUPABASE_URL || !CONFIG.SUPABASE_ANON_KEY) {
@@ -388,15 +395,45 @@ async function matchReceiptPriceWithDb() {
   setReceiptMessage('', null);
 
   try {
+    let dbAddressCandidate = null;
+    if (storeName) {
+      const params = new URLSearchParams({ select: 'store_name,address,valid_date' });
+      params.append('store_name', `ilike.*${storeName}*`);
+      params.append('order', 'valid_date.desc');
+      params.append('limit', '1');
+      const addressRes = await fetch(`${CONFIG.SUPABASE_URL}/rest/v1/${CONFIG.SUPABASE_VIEW}?${params.toString()}`, {
+        headers: {
+          apikey: CONFIG.SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${CONFIG.SUPABASE_ANON_KEY}`,
+        },
+      });
+      if (addressRes.ok) {
+        const rows = await addressRes.json();
+        dbAddressCandidate = rows?.[0] || null;
+      }
+    }
+
+    if (dbAddressCandidate?.address && !receiptStoreAddressInputEl.value.trim()) {
+      receiptStoreAddressInputEl.value = dbAddressCandidate.address;
+    }
+
+    if (!storeName || !productName) {
+      const missing = buildMissingFieldList();
+      setMatchResult(`DB補完を一部適用しました。未入力: ${missing.join('・') || 'なし'}`, missing.length ? 'error' : 'success');
+      return;
+    }
+
     const best = await findClosestPriceCandidate(storeName, productName);
     if (!best) {
       receiptPriceInputEl.value = '';
-      setMatchResult('DB上に近い商品が見つかりませんでした。金額を修正ボタンから手入力してください。', 'error');
+      const missing = buildMissingFieldList();
+      setMatchResult(`DB上に近い商品が見つかりませんでした。未入力: ${missing.join('・') || 'なし'}`, 'error');
       receiptMatchActionsEl.classList.remove('hidden');
       return;
     }
     receiptPriceInputEl.value = best.price;
-    setMatchResult(`候補: ${best.store_name} / ${best.group_name} / ${best.price}円（${formatDate(String(best.valid_date).replaceAll('-', ''))}時点）`, 'success');
+    const missing = buildMissingFieldList();
+    setMatchResult(`候補: ${best.store_name} / ${best.group_name} / ${best.price}円（${formatDate(String(best.valid_date).replaceAll('-', ''))}時点） / 未入力: ${missing.join('・') || 'なし'}`, missing.length ? 'error' : 'success');
     receiptMatchActionsEl.classList.remove('hidden');
   } catch (err) {
     setMatchResult(err.message || '照合に失敗しました。', 'error');

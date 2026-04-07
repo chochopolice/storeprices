@@ -81,36 +81,36 @@
       <aside class="side-column">
         <section class="panel submit-panel">
           <h2>レシート投稿</h2>
-          <p class="submit-lead">価格データの精度向上のため、レシート画像と必須情報を投稿できます。</p>
+          <p class="submit-lead">まずレシート画像を読み込み、DB補完で入力候補を埋めてから投稿できます。</p>
           <form id="receiptForm" class="receipt-form">
             <label class="field">
               <span>レシート画像（必須）</span>
-              <input id="receiptImageInput" type="file" accept="image/*" required />
+              <input id="receiptImageInput" type="file" accept="image/*" capture="environment" required />
             </label>
             <label class="field">
-              <span>店舗名（必須）</span>
-              <input id="receiptStoreNameInput" type="text" placeholder="例: イオン 市川妙典店" required />
+              <span>店舗名（DB補完可）</span>
+              <input id="receiptStoreNameInput" type="text" placeholder="例: イオン 市川妙典店" />
             </label>
             <label class="field">
-              <span>店舗住所（必須）</span>
-              <input id="receiptStoreAddressInput" type="text" placeholder="例: 千葉県市川市妙典5-3-1" required />
+              <span>店舗住所（DB補完可）</span>
+              <input id="receiptStoreAddressInput" type="text" placeholder="例: 千葉県市川市妙典5-3-1" />
             </label>
             <label class="field">
-              <span>商品名（必須）</span>
-              <input id="receiptProductNameInput" type="text" placeholder="例: 絹豆腐 150g" required />
+              <span>商品名（DB補完可）</span>
+              <input id="receiptProductNameInput" type="text" placeholder="例: 絹豆腐 150g" />
             </label>
             <div class="receipt-grid">
               <label class="field">
-                <span>金額（円・必須）</span>
-                <input id="receiptPriceInput" type="number" min="1" step="1" placeholder="例: 98" required readonly />
+                <span>金額（円・DB補完可）</span>
+                <input id="receiptPriceInput" type="number" min="1" step="1" placeholder="例: 98" readonly />
               </label>
               <label class="field">
-                <span>購入日（必須）</span>
-                <input id="receiptPurchasedAtInput" type="date" required />
+                <span>購入日（任意）</span>
+                <input id="receiptPurchasedAtInput" type="date" />
               </label>
             </div>
             <div class="receipt-match-box">
-              <button id="receiptMatchButton" type="button" class="button secondary">DBと照合して候補金額を表示</button>
+              <button id="receiptMatchButton" type="button" class="button secondary">DBと照合して入力候補を補完</button>
               <p id="receiptMatchResult" class="match-result"></p>
               <div id="receiptMatchActions" class="match-actions hidden">
                 <button id="receiptPriceOkButton" type="button" class="button primary small">この金額でOK</button>
@@ -121,7 +121,7 @@
               <span>補足メモ（任意）</span>
               <textarea id="receiptNoteInput" rows="2" placeholder="例: 特売・タイムセールなど"></textarea>
             </label>
-            <p class="submit-hint">DB整合性のため、店舗名・住所・商品名・金額・購入日は必須です。</p>
+            <p class="submit-hint">画像を先に投稿し、DB補完で埋まらない項目だけ追加入力してください。</p>
             <button id="receiptSubmitButton" type="submit" class="button primary">レシートを投稿</button>
             <p id="receiptMessage" class="receipt-message"></p>
           </form>
