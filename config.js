@@ -29,4 +29,8 @@ const CONFIG = {
   // ── 検索デフォルト ─────────────────────────────────────────
   DEFAULT_KEYWORD: '豆腐',
   DEFAULT_RADIUS:  2,           // 行徳エリアは2kmで主要店舗をカバー
+
+    // ── Supabase Edge Function ─────────────────────────────────────────
+  SUPABASE_EDGE_OCR_URL: 'https://jmohojrhuxpuoqdfxdjp.supabase.co/functions/v1/ocr-receipt',
+
 };
