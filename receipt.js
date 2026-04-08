@@ -34,6 +34,7 @@ let currentImageBase64 = '';   // base64（data:...を除いたもの）
 let currentImageMime   = '';
 let matchedStoreId     = null;
 let itemRows           = [];   // { rawName, groupName, groupId, price, matched }
+let latestOcrResult    = null;
 
 // ── ユーティリティ ─────────────────────────────────────────────────
 function normalize(text) {
@@ -113,6 +114,7 @@ async function runOcr() {
 
   try {
     const result = await callAnthropicOcr(currentImageBase64, currentImageMime);
+    latestOcrResult = result;
     showStatus('解析完了。DB照合中...', 'running');
     await applyOcrResult(result);
     showStatus('DB照合完了。内容を確認して投稿してください。', 'done');
@@ -161,6 +163,7 @@ async function callAnthropicOcr(base64, mime) {
 async function applyOcrResult(ocr) {
   // 日付
   if (ocr.date) purchasedOnInput.value = ocr.date;
+  const ocrStoreAddress = getOcrStoreAddress(ocr);
 
   // 店舗照合
   matchedStoreId = null;
@@ -169,10 +172,11 @@ async function applyOcrResult(ocr) {
     const storeResult = await matchStore(ocr.store_name);
     if (storeResult) {
       matchedStoreId = storeResult.id;
-      storeAddressInput.value = storeResult.address || '';
+      storeAddressInput.value = storeResult.address || ocrStoreAddress || '';
       storeMatchBadge.innerHTML =
         `<span class="store-badge matched">✅ DB照合済み: ${storeResult.name}</span>`;
     } else {
+      storeAddressInput.value = ocrStoreAddress || '';
       storeMatchBadge.innerHTML =
         `<span class="store-badge unmatched">⚠️ DB未照合 — 近い店舗が見つかりませんでした</span>`;
     }
@@ -225,6 +229,68 @@ async function matchProduct(productName) {
     .sort((a, b) => b.score - a.score)[0];
 
   return best.score > 0.2 ? best : null;
+}
+
+function getOcrStoreAddress(ocr) {
+  const candidates = [ocr?.store_address, ocr?.address, ocr?.store?.address];
+  return candidates.find(v => typeof v === 'string' && v.trim())?.trim() || '';
+}
+
+async function ensureStoreExists(storeName, storeAddress) {
+  const create = async (payload) => fetch(`${CONFIG.SUPABASE_URL}/rest/v1/stores`, {
+    method: 'POST',
+    headers: {
+      ...supabaseHeaders(),
+      'Content-Type': 'application/json',
+      Prefer: 'return=representation',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  let res = await create({ name: storeName, address: storeAddress || null });
+  if (!res.ok) {
+    // stores.lat/lng が NOT NULL の構成に備える
+    res = await create({
+      name: storeName,
+      address: storeAddress || null,
+      type: '不明',
+      lat: 0,
+      lng: 0,
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`店舗情報の登録に失敗しました (${res.status}): ${err}`);
+    }
+  }
+
+  const rows = await res.json();
+  const created = rows?.[0];
+  if (!created?.id) throw new Error('店舗情報の登録結果から store_id を取得できませんでした。');
+  return created.id;
+}
+
+async function updateStoreAddressIfEmpty(storeId, storeAddress) {
+  if (!storeId || !storeAddress) return;
+  const getRes = await fetch(
+    `${CONFIG.SUPABASE_URL}/rest/v1/stores?select=id,address&id=eq.${encodeURIComponent(storeId)}&limit=1`,
+    { headers: supabaseHeaders() }
+  );
+  if (!getRes.ok) return;
+  const rows = await getRes.json();
+  const currentAddress = rows?.[0]?.address;
+  if (typeof currentAddress === 'string' && currentAddress.trim()) return;
+
+  await fetch(
+    `${CONFIG.SUPABASE_URL}/rest/v1/stores?id=eq.${encodeURIComponent(storeId)}`,
+    {
+      method: 'PATCH',
+      headers: {
+        ...supabaseHeaders(),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ address: storeAddress }),
+    }
+  );
 }
 
 function supabaseHeaders() {
@@ -321,15 +387,24 @@ async function submitReceipt() {
   showMessage('投稿中...', '');
 
   try {
+    let resolvedStoreId = matchedStoreId || null;
+    if (!resolvedStoreId) {
+      resolvedStoreId = await ensureStoreExists(storeName, storeAddress || getOcrStoreAddress(latestOcrResult));
+      matchedStoreId = resolvedStoreId;
+      storeMatchBadge.innerHTML = '<span class="store-badge matched">✅ 店舗をDBに新規登録しました</span>';
+    } else {
+      await updateStoreAddressIfEmpty(resolvedStoreId, storeAddress || getOcrStoreAddress(latestOcrResult));
+    }
+
     const payload = {
-      store_id:      matchedStoreId || null,
+      store_id:      resolvedStoreId,
       store_name:    storeName,
-      store_address: storeAddress || null,
+      store_address: storeAddress || getOcrStoreAddress(latestOcrResult) || null,
       purchased_on:  purchasedOn,
       line_items:    lineItems,
       note:          note || null,
       source_type:   'user_receipt',
-      raw_ocr_text:  JSON.stringify({ items: itemRows }),
+      raw_ocr_text:  JSON.stringify(latestOcrResult || { items: itemRows }),
     };
 
     const res = await fetch(
@@ -358,6 +433,7 @@ async function submitReceipt() {
       ocrStatus.style.display   = 'none';
       ocrButton.disabled = true;
       currentImageBase64 = '';
+      latestOcrResult = null;
       receiptImageInput.value = '';
       storeNameInput.value = '';
       storeAddressInput.value = '';
