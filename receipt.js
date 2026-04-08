@@ -126,47 +126,26 @@ async function runOcr() {
 }
 
 async function callAnthropicOcr(base64, mime) {
-  const systemPrompt = `あなたはレシートOCRアシスタントです。
-画像からレシート情報を読み取り、以下のJSON形式のみで返答してください。
-他のテキストは一切含めないでください。
+  // GitHub Pages からは直接 Anthropic API を呼べないため
+  // Supabase Edge Function（ocr-receipt）を中継サーバーとして使用
+  const edgeUrl = CONFIG.SUPABASE_EDGE_OCR_URL;
+  if (!edgeUrl) {
+    throw new Error('config.js に SUPABASE_EDGE_OCR_URL が設定されていません。');
+  }
 
-{
-  "date": "YYYY-MM-DD または null",
-  "store_name": "店舗名 または null",
-  "items": [
-    { "name": "商品名", "price": 数値または null }
-  ]
-}
-
-注意:
-- 日付はレシートに記載の購入日
-- 商品名は略さずそのまま書き起こす
-- 価格は税込みの数値のみ（円マーク不要）
-- 読み取れない部分は null`;
-
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
+  const response = await fetch(edgeUrl, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1000,
-      system: systemPrompt,
-      messages: [{
-        role: 'user',
-        content: [{
-          type: 'image',
-          source: { type: 'base64', media_type: mime, data: base64 }
-        }, {
-          type: 'text',
-          text: 'このレシートを読み取ってください。'
-        }]
-      }]
-    })
+    headers: {
+      'Content-Type':  'application/json',
+      'apikey':        CONFIG.SUPABASE_ANON_KEY,
+      'Authorization': `Bearer ${CONFIG.SUPABASE_ANON_KEY}`,
+    },
+    body: JSON.stringify({ base64, mime }),
   });
 
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
-    throw new Error(err.error?.message || `API エラー (${response.status})`);
+    throw new Error(err.error || `OCR API エラー (${response.status})`);
   }
 
   const data = await response.json();
