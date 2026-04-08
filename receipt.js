@@ -1,439 +1,397 @@
-const receiptFormEl = document.getElementById('receiptForm');
-const receiptImageInputEl = document.getElementById('receiptImageInput');
-const receiptStoreNameInputEl = document.getElementById('receiptStoreNameInput');
-const receiptStoreAddressInputEl = document.getElementById('receiptStoreAddressInput');
-const receiptProductNameInputEl = document.getElementById('receiptProductNameInput');
-const receiptItemsInputEl = document.getElementById('receiptItemsInput');
-const receiptPriceInputEl = document.getElementById('receiptPriceInput');
-const receiptPurchasedAtInputEl = document.getElementById('receiptPurchasedAtInput');
-const receiptNoteInputEl = document.getElementById('receiptNoteInput');
-const receiptMatchButtonEl = document.getElementById('receiptMatchButton');
-const receiptMatchResultEl = document.getElementById('receiptMatchResult');
-const receiptMatchActionsEl = document.getElementById('receiptMatchActions');
-const receiptPriceOkButtonEl = document.getElementById('receiptPriceOkButton');
-const receiptPriceEditButtonEl = document.getElementById('receiptPriceEditButton');
-const receiptSubmitButtonEl = document.getElementById('receiptSubmitButton');
-const receiptMessageEl = document.getElementById('receiptMessage');
+/**
+ * receipt.js  ─  レシート投稿（OCR → DB照合 → 確認投稿）
+ *
+ * フロー:
+ *   1. 画像アップロード → プレビュー表示
+ *   2. Anthropic API（claude-sonnet-4-20250514）でOCR
+ *      → 日付・店舗名・商品一覧・価格を構造化JSON で取得
+ *   3. Supabase の stores / latest_store_product_prices で照合
+ *      → 店舗を特定、商品を product_group に名寄せ
+ *   4. テーブルに結果表示。照合できた行は🟢、できなかった行は🟡
+ *   5. ユーザが確認・修正 → user_receipt_submissions に投稿
+ */
 
-const RECEIPT_DRAFT_STORAGE_KEY = 'receipt_form_draft_v1';
-let currentReceiptFileKey = '';
+// ── DOM参照 ────────────────────────────────────────────────────────
+const uploadArea        = document.getElementById('uploadArea');
+const receiptImageInput = document.getElementById('receiptImageInput');
+const previewArea       = document.getElementById('previewArea');
+const previewImg        = document.getElementById('previewImg');
+const previewName       = document.getElementById('previewName');
+const ocrStatus         = document.getElementById('ocrStatus');
+const ocrButton         = document.getElementById('ocrButton');
+const step2Panel        = document.getElementById('step2Panel');
+const purchasedOnInput  = document.getElementById('purchasedOnInput');
+const storeNameInput    = document.getElementById('storeNameInput');
+const storeAddressInput = document.getElementById('storeAddressInput');
+const storeMatchBadge   = document.getElementById('storeMatchBadge');
+const itemsBody         = document.getElementById('itemsBody');
+const addRowBtn         = document.getElementById('addRowBtn');
+const noteInput         = document.getElementById('noteInput');
+const submitButton      = document.getElementById('submitButton');
+const receiptMessageEl  = document.getElementById('receiptMessage');
 
+let currentImageBase64 = '';   // base64（data:...を除いたもの）
+let currentImageMime   = '';
+let matchedStoreId     = null;
+let itemRows           = [];   // { rawName, groupName, groupId, price, matched }
+
+// ── ユーティリティ ─────────────────────────────────────────────────
 function normalize(text) {
-  return String(text || '')
-    .normalize('NFKC')
-    .trim()
-    .toLowerCase()
+  return String(text || '').normalize('NFKC').trim().toLowerCase()
     .replace(/[\s\u3000\-ー_]+/g, '');
 }
 
-function getTokenSet(text) {
-  return new Set(
-    normalize(text)
-      .split(/[^a-z0-9ぁ-んァ-ヶー一-龠]+/i)
-      .filter(Boolean)
-  );
+function tokenSim(a, b) {
+  const tokA = new Set(normalize(a).split(/[^a-z0-9\u3041-\u9fff]+/i).filter(Boolean));
+  const tokB = new Set(normalize(b).split(/[^a-z0-9\u3041-\u9fff]+/i).filter(Boolean));
+  if (!tokA.size || !tokB.size) return 0;
+  let hit = 0;
+  tokA.forEach(t => { if (tokB.has(t)) hit++; });
+  return hit / Math.max(tokA.size, tokB.size);
 }
 
-function getTokenSimilarity(a, b) {
-  const setA = getTokenSet(a);
-  const setB = getTokenSet(b);
-  if (!setA.size || !setB.size) return 0;
-
-  let intersection = 0;
-  setA.forEach(token => {
-    if (setB.has(token)) intersection += 1;
-  });
-  return intersection / Math.max(setA.size, setB.size);
+function showStatus(msg, state = 'info') {
+  ocrStatus.style.display = 'flex';
+  ocrStatus.className = `ocr-status ${state}`;
+  ocrStatus.innerHTML = state === 'running'
+    ? `<div class="spinner"></div><span>${msg}</span>`
+    : `<span>${msg}</span>`;
 }
 
-function formatDate(yyyymmdd) {
-  const v = String(yyyymmdd || '');
-  if (v.length !== 8) return v || '-';
-  return `${v.slice(0, 4)}/${v.slice(4, 6)}/${v.slice(6, 8)}`;
+function showMessage(msg, type = 'error') {
+  receiptMessageEl.textContent = msg;
+  receiptMessageEl.className = `receipt-message ${type}`;
 }
 
-function setReceiptMessage(text, type = 'error') {
-  receiptMessageEl.textContent = text;
-  receiptMessageEl.classList.remove('error', 'success');
-  if (type) receiptMessageEl.classList.add(type);
-}
-
-function setMatchResult(text, type = 'neutral') {
-  receiptMatchResultEl.textContent = text;
-  receiptMatchResultEl.classList.remove('success', 'error');
-  if (type === 'success' || type === 'error') {
-    receiptMatchResultEl.classList.add(type);
-  }
-}
-
-function getReceiptFileKey(file) {
-  if (!file) return '';
-  return [file.name || '', file.size || 0, file.lastModified || 0].join('::');
-}
-
-function loadReceiptDraftMap() {
-  try {
-    const raw = localStorage.getItem(RECEIPT_DRAFT_STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' ? parsed : {};
-  } catch (_) {
-    return {};
-  }
-}
-
-function saveReceiptDraftMap(map) {
-  try {
-    localStorage.setItem(RECEIPT_DRAFT_STORAGE_KEY, JSON.stringify(map));
-  } catch (_) {
-    // 保存不可時は無視
-  }
-}
-
-function toIsoDateString(dateValue) {
-  const v = String(dateValue || '').trim();
-  if (!v) return '';
-  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
-  return '';
-}
-
-function getCurrentReceiptDraft() {
-  return {
-    store_name: receiptStoreNameInputEl.value.trim(),
-    store_address: receiptStoreAddressInputEl.value.trim(),
-    product_name: receiptProductNameInputEl.value.trim(),
-    line_items_text: receiptItemsInputEl.value,
-    amount_yen: receiptPriceInputEl.value.trim(),
-    purchased_on: toIsoDateString(receiptPurchasedAtInputEl.value),
-  };
-}
-
-function applyReceiptDraftToForm(draft) {
-  if (!draft) return;
-  if (draft.store_name && !receiptStoreNameInputEl.value.trim()) receiptStoreNameInputEl.value = draft.store_name;
-  if (draft.store_address && !receiptStoreAddressInputEl.value.trim()) receiptStoreAddressInputEl.value = draft.store_address;
-  if (draft.product_name && !receiptProductNameInputEl.value.trim()) receiptProductNameInputEl.value = draft.product_name;
-  if (draft.line_items_text && !receiptItemsInputEl.value.trim()) receiptItemsInputEl.value = draft.line_items_text;
-  if (draft.amount_yen && !receiptPriceInputEl.value.trim()) receiptPriceInputEl.value = String(draft.amount_yen);
-  if (draft.purchased_on && !receiptPurchasedAtInputEl.value) receiptPurchasedAtInputEl.value = draft.purchased_on;
-}
-
-function persistReceiptDraft({ includeGlobal = false } = {}) {
-  const draftMap = loadReceiptDraftMap();
-  const currentDraft = getCurrentReceiptDraft();
-  if (currentReceiptFileKey) {
-    draftMap[currentReceiptFileKey] = currentDraft;
-  }
-  if (includeGlobal) {
-    draftMap.__latest = currentDraft;
-  }
-  saveReceiptDraftMap(draftMap);
-}
-
-function restoreDraftForSelectedFile() {
-  const selectedFile = receiptImageInputEl.files?.[0];
-  currentReceiptFileKey = getReceiptFileKey(selectedFile);
-  const draftMap = loadReceiptDraftMap();
-  const matched = (currentReceiptFileKey && draftMap[currentReceiptFileKey]) || draftMap.__latest;
-  applyReceiptDraftToForm(matched);
-}
-
-function resetMatchingState() {
-  receiptPriceInputEl.readOnly = true;
-  receiptMatchActionsEl.classList.add('hidden');
-  setMatchResult('');
-}
-
-async function fileToDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ''));
-    reader.onerror = () => reject(new Error('画像の読み取りに失敗しました。'));
-    reader.readAsDataURL(file);
-  });
-}
-
-async function postReceiptPayload(payload) {
-  const preferredTable = String(CONFIG.SUPABASE_RECEIPT_TABLE || 'user_receipt_submissions').trim();
-  const candidateTables = [
-    preferredTable,
-    'user_receipt_submissions',
-    'receipt_submissions',
-    'user_receipts',
-  ].filter((table, index, arr) => table && arr.indexOf(table) === index);
-
-  let lastError = null;
-  for (const table of candidateTables) {
-    let requestBody = payload;
-    const res = await fetch(`${CONFIG.SUPABASE_URL}/rest/v1/${table}`, {
-      method: 'POST',
-      headers: {
-        apikey: CONFIG.SUPABASE_ANON_KEY,
-        Authorization: `Bearer ${CONFIG.SUPABASE_ANON_KEY}`,
-        'Content-Type': 'application/json',
-        Prefer: 'return=minimal',
-      },
-      body: JSON.stringify(requestBody),
-    });
-
-    if (res.ok) return { table };
-
-    const errorText = await res.text().catch(() => '');
-    if (res.status === 400 && requestBody.line_items !== undefined && /line_items/i.test(errorText)) {
-      const { line_items, ...fallbackPayload } = requestBody;
-      const retryRes = await fetch(`${CONFIG.SUPABASE_URL}/rest/v1/${table}`, {
-        method: 'POST',
-        headers: {
-          apikey: CONFIG.SUPABASE_ANON_KEY,
-          Authorization: `Bearer ${CONFIG.SUPABASE_ANON_KEY}`,
-          'Content-Type': 'application/json',
-          Prefer: 'return=minimal',
-        },
-        body: JSON.stringify(fallbackPayload),
-      });
-      if (retryRes.ok) return { table };
-    }
-    lastError = new Error(`DB書き込みに失敗しました (HTTP ${res.status})`);
-    lastError.status = res.status;
-    lastError.table = table;
-    lastError.detail = errorText;
-    if (res.status !== 404) {
-      throw lastError;
-    }
-  }
-  throw lastError || new Error('DB書き込みに失敗しました。');
-}
-
-function parseLineItems(text) {
-  return String(text || '')
-    .split('\n')
-    .map(line => line.trim())
-    .filter(Boolean)
-    .map(line => {
-      const [namePart, pricePart] = line.split(',');
-      const amount = Number(String(pricePart || '').replace(/[^\d]/g, ''));
-      return {
-        product_name: String(namePart || '').trim(),
-        amount_yen: Number.isFinite(amount) && amount > 0 ? Math.round(amount) : null,
-      };
-    })
-    .filter(item => item.product_name);
-}
-
-async function submitReceipt(e) {
+// ── Step1: 画像選択・プレビュー ────────────────────────────────────
+uploadArea.addEventListener('click', () => receiptImageInput.click());
+uploadArea.addEventListener('dragover', e => { e.preventDefault(); uploadArea.classList.add('dragover'); });
+uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
+uploadArea.addEventListener('drop', e => {
   e.preventDefault();
+  uploadArea.classList.remove('dragover');
+  const file = e.dataTransfer.files[0];
+  if (file) handleFileSelected(file);
+});
+receiptImageInput.addEventListener('change', () => {
+  const file = receiptImageInput.files[0];
+  if (file) handleFileSelected(file);
+});
 
-  const imageFile = receiptImageInputEl.files?.[0];
-  const storeName = receiptStoreNameInputEl.value.trim();
-  const storeAddress = receiptStoreAddressInputEl.value.trim();
-  const productName = receiptProductNameInputEl.value.trim();
-  const lineItems = parseLineItems(receiptItemsInputEl.value);
-  const priceRaw = receiptPriceInputEl.value.trim();
-  const price = priceRaw ? Number(priceRaw) : null;
-  const purchasedAt = toIsoDateString(receiptPurchasedAtInputEl.value);
-  const note = receiptNoteInputEl.value.trim();
+function handleFileSelected(file) {
+  if (file.size > 5 * 1024 * 1024) {
+    showStatus('画像サイズは5MB以下にしてください。', 'error');
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = e => {
+    const dataUrl = e.target.result;
+    // base64部分だけ抽出
+    const [header, b64] = dataUrl.split(',');
+    currentImageBase64 = b64;
+    currentImageMime   = header.match(/:(.*?);/)[1];
 
-  if (!imageFile) {
-    setReceiptMessage('レシート画像を選択してください。', 'error');
-    return;
-  }
-  if (!CONFIG.SUPABASE_URL || !CONFIG.SUPABASE_ANON_KEY) {
-    setReceiptMessage('Supabase接続情報が未設定です。config.js を確認してください。', 'error');
-    return;
-  }
-  if (imageFile.size > 3 * 1024 * 1024) {
-    setReceiptMessage('画像サイズは3MB以下にしてください。', 'error');
-    return;
-  }
+    previewImg.src = dataUrl;
+    previewName.textContent = file.name;
+    previewArea.style.display = 'block';
+    ocrButton.disabled = false;
+    step2Panel.style.display = 'none';
+    ocrStatus.style.display  = 'none';
+    showMessage('', '');
+  };
+  reader.readAsDataURL(file);
+}
+
+// ── Step2: Anthropic API でOCR ─────────────────────────────────────
+ocrButton.addEventListener('click', runOcr);
+
+async function runOcr() {
+  if (!currentImageBase64) return;
+  ocrButton.disabled = true;
+  showStatus('AIでレシートを解析中...', 'running');
+  step2Panel.style.display = 'none';
 
   try {
-    setReceiptMessage('投稿中です...', null);
-    receiptSubmitButtonEl.disabled = true;
-
-    const imageDataUrl = await fileToDataUrl(imageFile);
-    const payload = {
-      store_name: storeName || null,
-      store_address: storeAddress || null,
-      product_name: productName || null,
-      line_items: lineItems.length ? lineItems : null,
-      amount_yen: Number.isFinite(price) && price > 0 ? Math.round(price) : null,
-      purchased_on: purchasedAt || null,
-      receipt_image_data_url: imageDataUrl,
-      note: note || null,
-      source_type: 'user_receipt',
-    };
-
-    await postReceiptPayload(payload);
-
-    receiptFormEl.reset();
-    currentReceiptFileKey = '';
-    resetMatchingState();
-    setReceiptMessage('投稿ありがとうございました。DBに保存しました。', 'success');
-    persistReceiptDraft({ includeGlobal: false });
+    const result = await callAnthropicOcr(currentImageBase64, currentImageMime);
+    showStatus('解析完了。DB照合中...', 'running');
+    await applyOcrResult(result);
+    showStatus('DB照合完了。内容を確認して投稿してください。', 'done');
+    step2Panel.style.display = 'block';
+    step2Panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (err) {
-    if (err?.status === 404) {
-      setReceiptMessage('DB書き込み先が見つかりません。schema.sql を実行し、config.js の SUPABASE_RECEIPT_TABLE を確認してください。', 'error');
-      return;
-    }
-    if (err?.status === 401 || err?.status === 403) {
-      setReceiptMessage('DBへの書き込み権限がありません。schema.sql の GRANT/POLICY 設定を反映してください。', 'error');
-      return;
-    }
-    setReceiptMessage(err.message || '投稿に失敗しました。', 'error');
+    showStatus(`エラー: ${err.message}`, 'error');
   } finally {
-    receiptSubmitButtonEl.disabled = false;
+    ocrButton.disabled = false;
   }
 }
 
-function buildMissingFieldList() {
-  const missing = [];
-  if (!receiptStoreNameInputEl.value.trim()) missing.push('店舗名');
-  if (!receiptStoreAddressInputEl.value.trim()) missing.push('店舗住所');
-  if (!receiptProductNameInputEl.value.trim()) missing.push('商品名');
-  if (!receiptPriceInputEl.value.trim()) missing.push('金額');
-  if (!toIsoDateString(receiptPurchasedAtInputEl.value)) missing.push('購入日');
-  return missing;
+async function callAnthropicOcr(base64, mime) {
+  const systemPrompt = `あなたはレシートOCRアシスタントです。
+画像からレシート情報を読み取り、以下のJSON形式のみで返答してください。
+他のテキストは一切含めないでください。
+
+{
+  "date": "YYYY-MM-DD または null",
+  "store_name": "店舗名 または null",
+  "items": [
+    { "name": "商品名", "price": 数値または null }
+  ]
 }
 
-async function findClosestPriceCandidate(storeName, productName) {
-  const headers = {
-    apikey: CONFIG.SUPABASE_ANON_KEY,
-    Authorization: `Bearer ${CONFIG.SUPABASE_ANON_KEY}`,
-  };
-  const params = new URLSearchParams({ select: 'store_name,group_name,price,valid_date' });
-  params.append('store_name', `ilike.*${storeName}*`);
-  params.append('group_name', `ilike.*${productName}*`);
-  params.append('order', 'valid_date.desc');
-  params.append('limit', '20');
+注意:
+- 日付はレシートに記載の購入日
+- 商品名は略さずそのまま書き起こす
+- 価格は税込みの数値のみ（円マーク不要）
+- 読み取れない部分は null`;
 
-  const res = await fetch(`${CONFIG.SUPABASE_URL}/rest/v1/${CONFIG.SUPABASE_VIEW}?${params.toString()}`, { headers });
-  if (!res.ok) throw new Error(`照合APIエラー (HTTP ${res.status})`);
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1000,
+      system: systemPrompt,
+      messages: [{
+        role: 'user',
+        content: [{
+          type: 'image',
+          source: { type: 'base64', media_type: mime, data: base64 }
+        }, {
+          type: 'text',
+          text: 'このレシートを読み取ってください。'
+        }]
+      }]
+    })
+  });
 
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error?.message || `API エラー (${response.status})`);
+  }
+
+  const data = await response.json();
+  const text = data.content?.find(b => b.type === 'text')?.text || '{}';
+
+  // JSON部分だけ抽出してパース
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error('AIの応答からJSONを取得できませんでした。');
+  return JSON.parse(jsonMatch[0]);
+}
+
+// ── Step3: OCR結果をDB照合して画面に反映 ───────────────────────────
+async function applyOcrResult(ocr) {
+  // 日付
+  if (ocr.date) purchasedOnInput.value = ocr.date;
+
+  // 店舗照合
+  matchedStoreId = null;
+  if (ocr.store_name) {
+    storeNameInput.value = ocr.store_name;
+    const storeResult = await matchStore(ocr.store_name);
+    if (storeResult) {
+      matchedStoreId = storeResult.id;
+      storeAddressInput.value = storeResult.address || '';
+      storeMatchBadge.innerHTML =
+        `<span class="store-badge matched">✅ DB照合済み: ${storeResult.name}</span>`;
+    } else {
+      storeMatchBadge.innerHTML =
+        `<span class="store-badge unmatched">⚠️ DB未照合 — 近い店舗が見つかりませんでした</span>`;
+    }
+  }
+
+  // 商品照合
+  itemRows = [];
+  const items = Array.isArray(ocr.items) ? ocr.items : [];
+  for (const item of items) {
+    if (!item.name) continue;
+    const match = await matchProduct(item.name);
+    itemRows.push({
+      rawName:   item.name,
+      groupName: match ? match.group_name : '',
+      groupId:   match ? match.group_id   : null,
+      price:     item.price ?? '',
+      matched:   !!match,
+    });
+  }
+
+  renderItemsTable();
+}
+
+async function matchStore(storeName) {
+  const url = `${CONFIG.SUPABASE_URL}/rest/v1/stores?select=id,name,address&name=ilike.*${encodeURIComponent(storeName)}*&limit=5`;
+  const res = await fetch(url, { headers: supabaseHeaders() });
+  if (!res.ok) return null;
+  const rows = await res.json();
+  if (!rows.length) return null;
+  // トークン類似度で最近似店舗を選択
+  return rows
+    .map(r => ({ ...r, score: tokenSim(storeName, r.name) }))
+    .sort((a, b) => b.score - a.score)[0];
+}
+
+async function matchProduct(productName) {
+  // product_aliases で照合（あいまいマッチ）
+  const url = `${CONFIG.SUPABASE_URL}/rest/v1/product_aliases?select=alias,group_id,product_groups(canonical_name)&alias=ilike.*${encodeURIComponent(normalize(productName))}*&limit=10`;
+  const res = await fetch(url, { headers: supabaseHeaders() });
+  if (!res.ok) return null;
   const rows = await res.json();
   if (!rows.length) return null;
 
-  const scored = rows
-    .map(row => {
-      const storeScore = getTokenSimilarity(storeName, row.store_name);
-      const productScore = getTokenSimilarity(productName, row.group_name);
-      const totalScore = storeScore * 0.45 + productScore * 0.55;
-      return { ...row, totalScore };
-    })
-    .sort((a, b) => b.totalScore - a.totalScore || String(b.valid_date).localeCompare(String(a.valid_date)));
+  const best = rows
+    .map(r => ({
+      group_id:   r.group_id,
+      group_name: r.product_groups?.canonical_name || r.alias,
+      score:      tokenSim(productName, r.alias),
+    }))
+    .sort((a, b) => b.score - a.score)[0];
 
-  return scored[0];
+  return best.score > 0.2 ? best : null;
 }
 
-async function matchReceiptPriceWithDb() {
-  const imageFile = receiptImageInputEl.files?.[0];
-  const storeName = receiptStoreNameInputEl.value.trim();
-  const productName = receiptProductNameInputEl.value.trim();
+function supabaseHeaders() {
+  return {
+    apikey:        CONFIG.SUPABASE_ANON_KEY,
+    Authorization: `Bearer ${CONFIG.SUPABASE_ANON_KEY}`,
+  };
+}
 
-  if (!imageFile) {
-    setMatchResult('先にレシート画像を選択してください。', 'error');
+// ── Step4: 商品テーブル描画 ────────────────────────────────────────
+function renderItemsTable() {
+  itemsBody.innerHTML = '';
+  itemRows.forEach((row, i) => {
+    const tr = document.createElement('tr');
+    tr.className = row.matched ? 'matched' : 'unmatched';
+    tr.innerHTML = `
+      <td><input type="text" value="${esc(row.rawName)}" data-i="${i}" data-field="rawName" /></td>
+      <td><input type="text" value="${esc(row.groupName)}" data-i="${i}" data-field="groupName"
+            placeholder="${row.matched ? '' : 'グループ名を入力'}" /></td>
+      <td><input type="number" value="${row.price !== '' ? row.price : ''}"
+            data-i="${i}" data-field="price" min="1" placeholder="円" /></td>
+      <td>
+        <span class="match-badge ${row.matched ? 'ok' : 'ng'}">
+          ${row.matched ? '🟢 照合済' : '🟡 要確認'}
+        </span>
+      </td>`;
+    itemsBody.appendChild(tr);
+  });
+
+  // インライン編集イベント
+  itemsBody.querySelectorAll('input').forEach(el => {
+    el.addEventListener('change', e => {
+      const i = Number(e.target.dataset.i);
+      const field = e.target.dataset.field;
+      if (field === 'price') {
+        itemRows[i].price = e.target.value ? Number(e.target.value) : '';
+      } else {
+        itemRows[i][field] = e.target.value;
+      }
+    });
+  });
+}
+
+function esc(s) {
+  return String(s || '').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+
+// 行追加
+addRowBtn.addEventListener('click', () => {
+  itemRows.push({ rawName: '', groupName: '', groupId: null, price: '', matched: false });
+  renderItemsTable();
+  // 追加した行の最初のinputにフォーカス
+  const lastRow = itemsBody.lastElementChild;
+  lastRow?.querySelector('input')?.focus();
+});
+
+// ── Step5: 投稿 ────────────────────────────────────────────────────
+submitButton.addEventListener('click', submitReceipt);
+
+async function submitReceipt() {
+  const storeName    = storeNameInput.value.trim();
+  const storeAddress = storeAddressInput.value.trim();
+  const purchasedOn  = purchasedOnInput.value || null;
+  const note         = noteInput.value.trim();
+
+  if (!currentImageBase64) {
+    showMessage('レシート画像を選択してください。', 'error');
     return;
   }
-  if (!CONFIG.SUPABASE_URL || !CONFIG.SUPABASE_ANON_KEY) {
-    setMatchResult('Supabase接続情報が未設定です。config.js を確認してください。', 'error');
+  if (!storeName) {
+    showMessage('店舗名を入力してください。', 'error');
     return;
   }
 
-  receiptMatchButtonEl.disabled = true;
-  setMatchResult('DB照合中です...');
-  receiptPriceInputEl.readOnly = true;
-  receiptMatchActionsEl.classList.add('hidden');
-  setReceiptMessage('', null);
+  // 商品リストの最新値を取得
+  itemsBody.querySelectorAll('tr').forEach((tr, i) => {
+    const inputs = tr.querySelectorAll('input');
+    if (inputs[0]) itemRows[i].rawName   = inputs[0].value;
+    if (inputs[1]) itemRows[i].groupName = inputs[1].value;
+    if (inputs[2]) itemRows[i].price     = inputs[2].value ? Number(inputs[2].value) : null;
+  });
+
+  const lineItems = itemRows
+    .filter(r => r.rawName || r.price)
+    .map(r => ({
+      raw_name:   r.rawName,
+      group_name: r.groupName || null,
+      group_id:   r.groupId   || null,
+      price:      r.price     || null,
+      matched:    r.matched,
+    }));
+
+  submitButton.disabled = true;
+  showMessage('投稿中...', '');
 
   try {
-    let dbAddressCandidate = null;
-    if (storeName) {
-      const params = new URLSearchParams({ select: 'store_name,address,valid_date' });
-      params.append('store_name', `ilike.*${storeName}*`);
-      params.append('order', 'valid_date.desc');
-      params.append('limit', '1');
+    const payload = {
+      store_id:      matchedStoreId || null,
+      store_name:    storeName,
+      store_address: storeAddress || null,
+      purchased_on:  purchasedOn,
+      line_items:    lineItems,
+      note:          note || null,
+      source_type:   'user_receipt',
+      raw_ocr_text:  JSON.stringify({ items: itemRows }),
+    };
 
-      const addressRes = await fetch(`${CONFIG.SUPABASE_URL}/rest/v1/${CONFIG.SUPABASE_VIEW}?${params.toString()}`, {
+    const res = await fetch(
+      `${CONFIG.SUPABASE_URL}/rest/v1/user_receipt_submissions`,
+      {
+        method: 'POST',
         headers: {
-          apikey: CONFIG.SUPABASE_ANON_KEY,
-          Authorization: `Bearer ${CONFIG.SUPABASE_ANON_KEY}`,
+          ...supabaseHeaders(),
+          'Content-Type': 'application/json',
+          Prefer: 'return=minimal',
         },
-      });
-      if (addressRes.ok) {
-        const rows = await addressRes.json();
-        dbAddressCandidate = rows?.[0] || null;
+        body: JSON.stringify(payload),
       }
+    );
+
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`DB書き込みに失敗しました (${res.status}): ${err}`);
     }
 
-    if (dbAddressCandidate?.address && !receiptStoreAddressInputEl.value.trim()) {
-      receiptStoreAddressInputEl.value = dbAddressCandidate.address;
-    }
+    showMessage('投稿ありがとうございました！DBに保存されました。', 'success');
+    // フォームリセット
+    setTimeout(() => {
+      previewArea.style.display = 'none';
+      step2Panel.style.display  = 'none';
+      ocrStatus.style.display   = 'none';
+      ocrButton.disabled = true;
+      currentImageBase64 = '';
+      receiptImageInput.value = '';
+      storeNameInput.value = '';
+      storeAddressInput.value = '';
+      purchasedOnInput.value = '';
+      noteInput.value = '';
+      storeMatchBadge.innerHTML = '';
+      itemRows = [];
+      itemsBody.innerHTML = '';
+    }, 3000);
 
-    if (!storeName || !productName) {
-      const missing = buildMissingFieldList();
-      setMatchResult(`DB補完を一部適用しました。未入力: ${missing.join('・') || 'なし'}`, missing.length ? 'error' : 'success');
-      return;
-    }
-
-    const best = await findClosestPriceCandidate(storeName, productName);
-    if (!best) {
-      receiptPriceInputEl.value = '';
-      const missing = buildMissingFieldList();
-      setMatchResult(`DB上に近い商品が見つかりませんでした。未入力: ${missing.join('・') || 'なし'}`, 'error');
-      receiptMatchActionsEl.classList.remove('hidden');
-      return;
-    }
-
-    receiptPriceInputEl.value = best.price;
-    const missing = buildMissingFieldList();
-    const normalizedValidDate = String(best.valid_date || '').replaceAll('-', '');
-    setMatchResult(`候補: ${best.store_name} / ${best.group_name} / ${best.price}円（${formatDate(normalizedValidDate)}時点） / 未入力: ${missing.join('・') || 'なし'}`, missing.length ? 'error' : 'success');
-    receiptMatchActionsEl.classList.remove('hidden');
-    persistReceiptDraft({ includeGlobal: true });
   } catch (err) {
-    setMatchResult(err.message || '照合に失敗しました。', 'error');
+    showMessage(err.message, 'error');
   } finally {
-    receiptMatchButtonEl.disabled = false;
+    submitButton.disabled = false;
   }
 }
-
-function confirmMatchedPrice() {
-  if (!receiptPriceInputEl.value) {
-    setReceiptMessage('金額が未入力です。照合を実行するか、修正して入力してください。', 'error');
-    return;
-  }
-  receiptPriceInputEl.readOnly = true;
-  setReceiptMessage('金額を確定しました。投稿できます。', 'success');
-}
-
-function enableManualPriceEdit() {
-  receiptPriceInputEl.readOnly = false;
-  receiptPriceInputEl.focus();
-  setReceiptMessage('金額を修正してください。修正後はそのまま投稿できます。', 'success');
-}
-
-receiptFormEl.addEventListener('submit', submitReceipt);
-receiptMatchButtonEl.addEventListener('click', matchReceiptPriceWithDb);
-receiptPriceOkButtonEl.addEventListener('click', confirmMatchedPrice);
-receiptPriceEditButtonEl.addEventListener('click', enableManualPriceEdit);
-
-receiptImageInputEl.addEventListener('change', () => {
-  resetMatchingState();
-  restoreDraftForSelectedFile();
-});
-receiptStoreNameInputEl.addEventListener('input', () => {
-  resetMatchingState();
-  persistReceiptDraft({ includeGlobal: true });
-});
-receiptStoreAddressInputEl.addEventListener('input', () => persistReceiptDraft({ includeGlobal: true }));
-receiptProductNameInputEl.addEventListener('input', () => {
-  resetMatchingState();
-  persistReceiptDraft({ includeGlobal: true });
-});
-receiptItemsInputEl.addEventListener('input', () => persistReceiptDraft({ includeGlobal: true }));
-receiptPriceInputEl.addEventListener('input', () => persistReceiptDraft({ includeGlobal: true }));
-receiptPurchasedAtInputEl.addEventListener('change', () => persistReceiptDraft({ includeGlobal: true }));
-
-window.addEventListener('load', () => {
-  applyReceiptDraftToForm(loadReceiptDraftMap().__latest);
-  resetMatchingState();
-});

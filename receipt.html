@@ -5,70 +5,225 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>レシート投稿 | 近所の最安商品マップ</title>
   <link rel="stylesheet" href="./style.css" />
+  <style>
+    /* ── レシートページ固有スタイル ── */
+    .receipt-page-main { padding: 20px 0 60px; }
+    .receipt-nav { margin-bottom: 16px; }
+
+    .step-panel { margin-bottom: 16px; }
+    .step-header {
+      display: flex; align-items: center; gap: 10px;
+      margin-bottom: 12px;
+    }
+    .step-num {
+      width: 28px; height: 28px; border-radius: 50%;
+      background: #2e5fa3; color: #fff;
+      font-size: 13px; font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .step-header h2 { font-size: 15px; font-weight: 600; color: #1a3a5c; margin: 0; }
+
+    /* アップロードエリア */
+    .upload-area {
+      border: 2px dashed #c0cfe0;
+      border-radius: 10px;
+      padding: 32px 16px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color .15s, background .15s;
+      background: #f8fafc;
+    }
+    .upload-area:hover, .upload-area.dragover {
+      border-color: #2e5fa3; background: #eef4fc;
+    }
+    .upload-area input[type="file"] { display: none; }
+    .upload-icon { font-size: 36px; margin-bottom: 8px; }
+    .upload-area p { font-size: 13px; color: #666; margin: 4px 0; }
+    .upload-area .upload-hint { font-size: 11px; color: #aaa; }
+
+    /* プレビュー */
+    #previewArea { margin-top: 12px; display: none; }
+    #previewImg {
+      max-width: 100%; max-height: 240px;
+      border-radius: 8px; border: 1px solid #e0e8f0;
+      display: block; margin: 0 auto 8px;
+    }
+    .preview-name { font-size: 12px; color: #888; text-align: center; }
+
+    /* OCRステータス */
+    .ocr-status {
+      display: flex; align-items: center; gap: 8px;
+      padding: 10px 14px; border-radius: 8px;
+      font-size: 13px; margin-top: 12px;
+      background: #edf2fb; color: #2e5fa3;
+    }
+    .ocr-status.running { background: #fff8e6; color: #b07800; }
+    .ocr-status.done    { background: #eaf3de; color: #27500a; }
+    .ocr-status.error   { background: #fcebeb; color: #791f1f; }
+    .spinner {
+      width: 16px; height: 16px; border: 2px solid currentColor;
+      border-top-color: transparent; border-radius: 50%;
+      animation: spin .7s linear infinite; flex-shrink: 0;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* 商品リスト */
+    .items-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px; }
+    .items-table th {
+      background: #1a3a5c; color: #fff;
+      padding: 8px 10px; text-align: left; font-weight: 600;
+    }
+    .items-table td { padding: 8px 10px; border-bottom: 1px solid #eef1f6; vertical-align: middle; }
+    .items-table tr:last-child td { border-bottom: none; }
+    .items-table tr.matched td { background: #f0f6ff; }
+    .items-table tr.unmatched td { background: #fff8f0; }
+    .items-table input[type="text"], .items-table input[type="number"] {
+      width: 100%; border: 1.5px solid #d0d8e4; border-radius: 6px;
+      padding: 5px 8px; font-size: 13px; box-sizing: border-box;
+    }
+    .items-table input:focus { outline: none; border-color: #2e5fa3; }
+    .match-badge {
+      font-size: 10px; font-weight: 700; padding: 2px 6px;
+      border-radius: 99px; white-space: nowrap;
+    }
+    .match-badge.ok  { background: #eaf3de; color: #27500a; }
+    .match-badge.ng  { background: #fff0e0; color: #854f0b; }
+    .match-badge.new { background: #edf2fb; color: #2e5fa3; }
+
+    /* ストア照合バッジ */
+    .store-badge {
+      display: inline-block; font-size: 11px; padding: 3px 8px;
+      border-radius: 99px; margin-top: 4px;
+    }
+    .store-badge.matched { background: #eaf3de; color: #27500a; }
+    .store-badge.unmatched { background: #fff0e0; color: #854f0b; }
+
+    /* フォーム部品 */
+    .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+    .field span, .field label { font-size: 12px; font-weight: 600; color: #555; }
+    .field input[type="text"], .field input[type="date"],
+    .field input[type="number"], .field select, .field textarea {
+      padding: 8px 10px; border: 1.5px solid #d0d8e4; border-radius: 6px;
+      font-size: 13px; background: #fff; width: 100%; box-sizing: border-box;
+    }
+    .field input:focus, .field select:focus, .field textarea:focus {
+      outline: none; border-color: #2e5fa3;
+    }
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+    /* ボタン */
+    .button { padding: 8px 18px; border: none; border-radius: 6px;
+      font-size: 13px; font-weight: 600; cursor: pointer; transition: background .15s; }
+    .button.primary   { background: #2e5fa3; color: #fff; }
+    .button.primary:hover  { background: #1a3a5c; }
+    .button.secondary { background: #e8f0fb; color: #2e5fa3; }
+    .button.secondary:hover{ background: #d0dff5; }
+    .button:disabled  { opacity: .5; cursor: not-allowed; }
+    .button-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+
+    /* メッセージ */
+    .receipt-message { margin-top: 12px; font-size: 13px; padding: 10px 14px; border-radius: 8px; }
+    .receipt-message.success { background: #eaf3de; color: #27500a; }
+    .receipt-message.error   { background: #fcebeb; color: #791f1f; }
+    .receipt-message:empty   { display: none; }
+
+    /* 行追加ボタン */
+    .add-row-btn {
+      font-size: 12px; color: #2e5fa3; background: none; border: none;
+      cursor: pointer; padding: 6px 0; text-decoration: underline;
+    }
+  </style>
 </head>
 <body>
   <header class="site-header">
     <div class="container">
       <h1>レシート投稿</h1>
-      <p>レシート画像をアップロードし、価格データを投稿できます。</p>
+      <p>レシート画像をアップロードして価格データを投稿できます。</p>
     </div>
   </header>
 
   <main class="container receipt-page-main">
     <nav class="receipt-nav">
-      <a class="button secondary nav-button" href="./index.html">検索ページへ戻る</a>
+      <a class="button secondary" href="./index.html">← 検索ページへ戻る</a>
     </nav>
 
-    <section class="panel submit-panel receipt-standalone-panel">
-      <h2>レシート投稿フォーム</h2>
-      <p class="submit-lead">まずレシート画像を読み込み、DB補完で入力候補を埋めてから投稿できます。</p>
-      <form id="receiptForm" class="receipt-form">
-        <label class="field">
-          <span>レシート画像（必須）</span>
-          <input id="receiptImageInput" type="file" accept="image/*" capture="environment" required />
-        </label>
-        <label class="field">
-          <span>店舗名（DB補完可）</span>
-          <input id="receiptStoreNameInput" type="text" placeholder="例: イオン 市川妙典店" />
-        </label>
-        <label class="field">
-          <span>店舗住所（DB補完可）</span>
-          <input id="receiptStoreAddressInput" type="text" placeholder="例: 千葉県市川市妙典5-3-1" />
-        </label>
-        <label class="field">
-          <span>商品名（DB補完可）</span>
-          <input id="receiptProductNameInput" type="text" placeholder="例: 絹豆腐 150g" />
-        </label>
-        <label class="field">
-          <span>商品一覧（任意・1行に1商品）</span>
-          <textarea id="receiptItemsInput" rows="4" placeholder="例:&#10;絹豆腐 150g,98&#10;納豆 3パック,89&#10;卵 10個,259"></textarea>
-        </label>
-        <div class="receipt-grid">
-          <label class="field">
-            <span>金額（円・DB補完可）</span>
-            <input id="receiptPriceInput" type="number" min="1" step="1" placeholder="例: 98" readonly />
-          </label>
-          <label class="field">
-            <span>購入日（任意）</span>
-            <input id="receiptPurchasedAtInput" type="date" />
-          </label>
+    <!-- Step 1: 画像アップロード -->
+    <section class="panel step-panel">
+      <div class="step-header">
+        <div class="step-num">1</div>
+        <h2>レシート画像を選択</h2>
+      </div>
+      <div class="upload-area" id="uploadArea">
+        <input type="file" id="receiptImageInput" accept="image/*" capture="environment" />
+        <div class="upload-icon">📷</div>
+        <p>クリックまたはドラッグ＆ドロップで画像を選択</p>
+        <p class="upload-hint">JPG / PNG / HEIC・最大 5MB</p>
+      </div>
+      <div id="previewArea">
+        <img id="previewImg" src="" alt="プレビュー" />
+        <div class="preview-name" id="previewName"></div>
+      </div>
+      <div id="ocrStatus" class="ocr-status" style="display:none"></div>
+      <div class="button-row" style="margin-top:12px">
+        <button id="ocrButton" class="button primary" disabled>📖 レシートを読み込む（AI解析）</button>
+      </div>
+    </section>
+
+    <!-- Step 2: 解析結果 + DB照合 -->
+    <section class="panel step-panel" id="step2Panel" style="display:none">
+      <div class="step-header">
+        <div class="step-num">2</div>
+        <h2>解析結果・DB照合</h2>
+      </div>
+
+      <!-- 店舗情報 -->
+      <div class="two-col">
+        <div class="field">
+          <span>購入日</span>
+          <input type="date" id="purchasedOnInput" />
         </div>
-        <div class="receipt-match-box">
-          <button id="receiptMatchButton" type="button" class="button secondary">DBと照合して入力候補を補完</button>
-          <p id="receiptMatchResult" class="match-result"></p>
-          <div id="receiptMatchActions" class="match-actions hidden">
-            <button id="receiptPriceOkButton" type="button" class="button primary small">この金額でOK</button>
-            <button id="receiptPriceEditButton" type="button" class="button secondary small">金額を修正する</button>
-          </div>
-        </div>
-        <label class="field">
-          <span>補足メモ（任意）</span>
-          <textarea id="receiptNoteInput" rows="2" placeholder="例: 特売・タイムセールなど"></textarea>
-        </label>
-        <p class="submit-hint">画像を先に投稿し、DB補完で埋まらない項目だけ追加入力してください。</p>
-        <button id="receiptSubmitButton" type="submit" class="button primary">レシートを投稿</button>
-        <p id="receiptMessage" class="receipt-message"></p>
-      </form>
+        <div></div>
+      </div>
+      <div class="field">
+        <span>店舗名</span>
+        <input type="text" id="storeNameInput" placeholder="例: マルエツ 行徳駅前店" />
+        <div id="storeMatchBadge"></div>
+      </div>
+      <div class="field">
+        <span>住所</span>
+        <input type="text" id="storeAddressInput" placeholder="DB照合で自動入力されます" />
+      </div>
+
+      <!-- 商品リスト -->
+      <div style="margin-top:8px; margin-bottom:6px; font-size:12px; font-weight:600; color:#555">
+        商品一覧
+        <span style="font-weight:400; color:#aaa; margin-left:6px">
+          🟢 DB照合済み &nbsp; 🟡 照合できず（要確認）
+        </span>
+      </div>
+      <table class="items-table" id="itemsTable">
+        <thead>
+          <tr>
+            <th style="width:40%">商品名（OCR）</th>
+            <th style="width:28%">DBグループ名</th>
+            <th style="width:16%">価格（円）</th>
+            <th style="width:16%">状態</th>
+          </tr>
+        </thead>
+        <tbody id="itemsBody"></tbody>
+      </table>
+      <button class="add-row-btn" id="addRowBtn">＋ 行を追加</button>
+
+      <div class="field" style="margin-top:12px">
+        <span>補足メモ（任意）</span>
+        <textarea id="noteInput" rows="2" placeholder="例: 特売・タイムセールなど"></textarea>
+      </div>
+
+      <div class="button-row">
+        <button id="submitButton" class="button primary">✅ この内容で投稿する</button>
+      </div>
+      <div id="receiptMessage" class="receipt-message"></div>
     </section>
   </main>
 
