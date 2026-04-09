@@ -124,6 +124,8 @@ KNOWN_TYPES = [
 #    "その他のお店",
 ]
 
+ALLOWED_TYPES = set(KNOWN_TYPES)
+
 
 
 @dataclass
@@ -371,6 +373,12 @@ class TokubaiCityScraper:
         for idx, store_url in enumerate(self.iter_store_urls(), start=1):
             try:
                 record = self.parse_store_page(store_url)
+                if record.type not in ALLOWED_TYPES:
+                    print(
+                        f"[{idx}] SKIP {record.store_code} {record.name} "
+                        f"(type={record.type})"
+                    )
+                    continue
                 rows.append(record.to_dict())
                 print(f"[{idx}] OK  {record.store_code} {record.name}")
             except Exception as e:
