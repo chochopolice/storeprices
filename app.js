@@ -612,7 +612,7 @@ async function loadStoresFromJson() {
   stores = await res.json();
 }
 
-async function fetchFromSupabase(keyword, category, storeType, radiusKm) {
+async function fetchFromSupabase(keyword, category, subcategory, storeType, radiusKm) {
   const { SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_VIEW } = CONFIG;
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
     throw new Error('config.js に SUPABASE_URL と SUPABASE_ANON_KEY を設定してください');
@@ -625,12 +625,32 @@ async function fetchFromSupabase(keyword, category, storeType, radiusKm) {
     'Range-Unit':  'items',
     'Range':       '0-999',
   };
+
+  const locationFilter =
+    `&lat=gte.${currentLocation.lat - deg}&lat=lte.${currentLocation.lat + deg}` +
+    `&lng=gte.${currentLocation.lng - deg}&lng=lte.${currentLocation.lng + deg}`;
+
+  // ── Step 1: item_name で検索（生の商品名に含まれるか）──────────
+  if (keyword) {
+    let url = `${SUPABASE_URL}/rest/v1/${SUPABASE_VIEW}?select=*`;
+    url += `&item_name=ilike.*${encodeURIComponent(keyword)}*`;
+    if (category)    url += `&category=eq.${encodeURIComponent(category)}`;
+    if (subcategory) url += `&subcategory=eq.${encodeURIComponent(subcategory)}`;
+    if (storeType)   url += `&store_type=eq.${encodeURIComponent(storeType)}`;
+    url += locationFilter;
+    const res = await fetch(url, { headers });
+    if (!res.ok) throw new Error(`Supabase API エラー (${res.status})`);
+    const rows = await res.json();
+    if (rows.length > 0) return rows;
+  }
+
+  // ── Step 2: group_name で検索（product_groups の canonical_name）──
   let url = `${SUPABASE_URL}/rest/v1/${SUPABASE_VIEW}?select=*`;
-  if (keyword)   url += `&group_name=ilike.*${encodeURIComponent(keyword)}*`;
-  if (category)  url += `&category=eq.${encodeURIComponent(category)}`;
-  if (storeType) url += `&store_type=eq.${encodeURIComponent(storeType)}`;
-  url += `&lat=gte.${currentLocation.lat - deg}&lat=lte.${currentLocation.lat + deg}`;
-  url += `&lng=gte.${currentLocation.lng - deg}&lng=lte.${currentLocation.lng + deg}`;
+  if (keyword)     url += `&group_name=ilike.*${encodeURIComponent(keyword)}*`;
+  if (category)    url += `&category=eq.${encodeURIComponent(category)}`;
+  if (subcategory) url += `&subcategory=eq.${encodeURIComponent(subcategory)}`;
+  if (storeType)   url += `&store_type=eq.${encodeURIComponent(storeType)}`;
+  url += locationFilter;
   const res = await fetch(url, { headers });
   if (!res.ok) throw new Error(`Supabase API エラー (${res.status})`);
   return res.json();
@@ -662,7 +682,7 @@ async function fetchMatches(keyword, category, storeType, sortBy, radiusKm) {
         }));
     });
   } else if (CONFIG.DATA_SOURCE === 'supabase') {
-    const rows = await fetchFromSupabase(keyword, category, storeType, radiusKm);
+    const rows = await fetchFromSupabase(keyword, category, document.getElementById("subcategorySelect")?.value || "", storeType, radiusKm);
     return rows
       .map(row => ({
         storeName:    row.store_name,
@@ -705,6 +725,31 @@ function populateFilters() {
     opt.value = opt.textContent = type;
     storeTypeSelect.appendChild(opt);
   });
+
+  // カテゴリ変更時にサブカテゴリを動的更新
+  categorySelect.addEventListener('change', updateSubcategories);
+}
+
+async function updateSubcategories() {
+  const subcategorySelect = document.getElementById('subcategorySelect');
+  if (!subcategorySelect) return;
+  const cat = categorySelect.value;
+  subcategorySelect.innerHTML = '<option value="">すべて</option>';
+  if (!cat || CONFIG.DATA_SOURCE !== 'supabase') return;
+  try {
+    const res = await fetch(
+      `${CONFIG.SUPABASE_URL}/rest/v1/product_groups?select=subcategory&category=eq.${encodeURIComponent(cat)}&order=subcategory`,
+      { headers: { apikey: CONFIG.SUPABASE_ANON_KEY, Authorization: `Bearer ${CONFIG.SUPABASE_ANON_KEY}` } }
+    );
+    if (!res.ok) return;
+    const rows = await res.json();
+    const subs = [...new Set(rows.map(r => r.subcategory).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ja'));
+    subs.forEach(sub => {
+      const opt = document.createElement('option');
+      opt.value = opt.textContent = sub;
+      subcategorySelect.appendChild(opt);
+    });
+  } catch(e) { console.warn('サブカテゴリ取得失敗:', e); }
 }
 
 // ===== 【機能2】カードクリックで地図移動 ============================
