@@ -630,21 +630,23 @@ async function fetchFromSupabase(keyword, category, subcategory, storeType, radi
     `&lat=gte.${currentLocation.lat - deg}&lat=lte.${currentLocation.lat + deg}` +
     `&lng=gte.${currentLocation.lng - deg}&lng=lte.${currentLocation.lng + deg}`;
 
-  // ── Step 1: item_name で検索（生の商品名に含まれるか）──────────
+  // item_name（生の商品名）で検索し、ヒットしなければ group_name で検索
+  // Step1: item_name 検索
   if (keyword) {
-    let url = `${SUPABASE_URL}/rest/v1/${SUPABASE_VIEW}?select=*`;
-    url += `&item_name=ilike.*${encodeURIComponent(keyword)}*`;
-    if (category)    url += `&category=eq.${encodeURIComponent(category)}`;
-    if (subcategory) url += `&subcategory=eq.${encodeURIComponent(subcategory)}`;
-    if (storeType)   url += `&store_type=eq.${encodeURIComponent(storeType)}`;
-    url += locationFilter;
-    const res = await fetch(url, { headers });
-    if (!res.ok) throw new Error(`Supabase API エラー (${res.status})`);
-    const rows = await res.json();
-    if (rows.length > 0) return rows;
+    let url1 = `${SUPABASE_URL}/rest/v1/${SUPABASE_VIEW}?select=*`;
+    url1 += `&item_name=ilike.*${encodeURIComponent(keyword)}*&item_name=not.is.null`;
+    if (category)    url1 += `&category=eq.${encodeURIComponent(category)}`;
+    if (subcategory) url1 += `&subcategory=eq.${encodeURIComponent(subcategory)}`;
+    if (storeType)   url1 += `&store_type=eq.${encodeURIComponent(storeType)}`;
+    url1 += locationFilter;
+    const res1 = await fetch(url1, { headers });
+    if (res1.ok) {
+      const rows1 = await res1.json();
+      if (rows1.length > 0) return rows1;
+    }
   }
 
-  // ── Step 2: group_name で検索（product_groups の canonical_name）──
+  // Step2: group_name 検索（フォールバック）
   let url = `${SUPABASE_URL}/rest/v1/${SUPABASE_VIEW}?select=*`;
   if (keyword)     url += `&group_name=ilike.*${encodeURIComponent(keyword)}*`;
   if (category)    url += `&category=eq.${encodeURIComponent(category)}`;
@@ -910,6 +912,7 @@ addressInput.addEventListener('keydown', e => { if (e.key === 'Enter') geocodeAd
 
 categorySelect.addEventListener('change',  searchItems);
 storeTypeSelect.addEventListener('change', searchItems);
+document.addEventListener('change', e => { if (e.target.id === 'subcategorySelect') searchItems(); });
 sortSelect.addEventListener('change',      searchItems);
 radiusInput.addEventListener('change',     searchItems);
 if (receiptFormEl) receiptFormEl.addEventListener('submit', submitReceipt);
