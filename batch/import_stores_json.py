@@ -1,15 +1,10 @@
 """
 import_stores_json.py  ─  stores.json の商品データを Supabase に一括インポート
 
-やること:
-  1. stores.json の各店舗を stores テーブルに照合（store_code または name で）
-  2. 各商品を product_aliases で name → group_id に名寄せ
-  3. normalized_prices に insert
-  4. マテリアライズドビューを更新
-
-使い方:
-  batch/ フォルダで実行:
-    python import_stores_json.py
+修正点:
+  - 座標なし店舗もDBに名前照合で登録
+  - subcategoryをDBのproduct_groupsのsubcategoryに変換してマッチ精度向上
+  - 商品名の部分一致マッチも強化
 """
 
 import json, os, sys, unicodedata, re
@@ -23,62 +18,122 @@ STORES_JSON = BASE_DIR.parent / "data" / "stores.json"
 
 load_dotenv(BASE_DIR / ".env")
 
-def normalize(text):
-    text = unicodedata.normalize("NFKC", str(text or ""))
-    return re.sub(r"[\s　\-ー_]+", "", text).strip().lower()
+# stores.json の subcategory → DB の subcategory マッピング
+SUBCAT_MAP = {
+    "野菜":   "野菜",
+    "魚":     "魚・海産物",
+    "調味料":  "調味料",
+    "海産物":  "魚・海産物",
+    "納豆":   "大豆製品",
+    "鶏肉":   "肉・加工肉",
+    "果物":   "果物",
+    "豚肉":   "肉・加工肉",
+    "牛肉":   "肉・加工肉",
+    "豆腐":   "大豆製品",
+    "豆乳":   "豆腐・大豆製品",
+    "乳製品":  "乳製品・卵",
+    "卵":     "卵",
+    "漬物":   "惣菜・弁当",
+    "菓子":   "菓子・スイーツ",
+    "おつまみ": "菓子・スイーツ",
+    "加工品":  "惣菜・弁当",
+    "加工肉":  "肉・加工肉",
+    "ごはん":  "米・パン・麺",
+    "惣菜":   "惣菜・弁当",
+    "香辛料":  "調味料",
+    "油":     "調味料",
+    "パン":   "米・パン・麺",
+    "米":     "米・パン・麺",
+    "水":     "飲料",
+    "コーヒー": "飲料",
+    "お茶":   "飲料",
+    "シャンプー": "日用品",
+    "歯ブラシ": "日用品",
+    "歯磨き粉": "日用品",
+    "洗剤":   "日用品",
+    "掃除":   "日用品",
+    "トイレ":  "日用品",
+    "衛生用品": "日用品",
+    "ゴミ袋":  "日用品",
+    "消臭剤":  "日用品",
+    "化粧水":  "日用品",
+    "整髪料":  "日用品",
+    "洗濯洗剤": "洗剤",
+    "バス用品": "日用品",
+    "ボディーソープ": "日用品",
+    "キッチンペーパー": "台所用品",
+    "スポンジ": "台所用品",
+}
 
-def find_group_id(item_name, alias_map):
+def normalize(t):
+    t = unicodedata.normalize("NFKC", str(t or ""))
+    return re.sub(r"[\s　\-ー_・]+", "", t).strip().lower()
+
+def find_group_id(item_name, subcat, alias_map, group_subcat_map):
     n = normalize(item_name)
+
+    # 1. 完全一致
     if n in alias_map:
         return alias_map[n]
+
+    # 2. aliasが商品名に含まれる（例: "納豆" → "おかめ納豆"）
+    matches = []
     for alias, gid in alias_map.items():
-        if alias and alias in n:
-            return gid
+        if alias and len(alias) >= 2 and alias in n:
+            matches.append((len(alias), gid))
+    if matches:
+        matches.sort(reverse=True)
+        return matches[0][1]
+
+    # 3. 商品名がaliasに含まれる
     for alias, gid in alias_map.items():
-        if alias and n in alias:
+        if alias and len(alias) >= 2 and n in alias:
             return gid
+
     return None
 
 def main():
     url = os.environ.get("SUPABASE_URL", "")
     key = os.environ.get("SUPABASE_SERVICE_KEY", "")
     if not url or not key:
-        print("❌  .env に SUPABASE_URL と SUPABASE_SERVICE_KEY を設定してください")
+        print("❌  SUPABASE_URL / SUPABASE_SERVICE_KEY が未設定")
         sys.exit(1)
 
     supabase = create_client(url, key)
     print("✓ Supabase 接続OK")
 
-    # stores.json 読み込み
     stores_data = json.loads(STORES_JSON.read_text(encoding="utf-8"))
-    print(f"  stores.json: {len(stores_data)} 店舗")
+    print(f"  stores.json: {len(stores_data)} 店舗 / "
+          f"{sum(len(s.get('items',[])) for s in stores_data)} 商品")
 
-    # ── Supabase の stores テーブルを全件取得（name で照合）
-    res = supabase.table("stores").select("id, name, address, lat, lng").execute()
-    db_stores = res.data or []
-    db_store_map = {normalize(s["name"]): s for s in db_stores}
+    # DBの店舗一覧取得（名前で照合）
+    res = supabase.table("stores").select("id, name, lat, lng").execute()
+    db_stores = {normalize(s["name"]): s for s in (res.data or [])}
     print(f"  DBの店舗数: {len(db_stores)}")
 
-    # ── product_aliases を取得
+    # product_aliases 取得
     res2 = supabase.table("product_aliases").select("alias, group_id").execute()
     alias_map = {normalize(r["alias"]): r["group_id"] for r in (res2.data or [])}
     print(f"  エイリアス数: {len(alias_map)}")
+
+    # product_groups の subcategory マップ
+    res3 = supabase.table("product_groups").select("id, canonical_name, subcategory").execute()
+    group_subcat_map = {r["id"]: r["subcategory"] for r in (res3.data or [])}
 
     today = date.today().isoformat()
     inserted_stores = 0
     inserted_prices = 0
     skipped_prices  = 0
-    unmatched_items = []
+    unmatched = []
 
     for store in stores_data:
         store_name = store["name"]
-        lat  = store.get("lat")
-        lng  = store.get("lng")
+        lat = store.get("lat")
+        lng = store.get("lng")
 
-        # DBで店舗を照合
-        db_store = db_store_map.get(normalize(store_name))
+        # DB照合（正規化した名前で）
+        db_store = db_stores.get(normalize(store_name))
 
-        # DBに存在しない or 座標がない場合は insert/update
         if not db_store:
             if not lat or not lng:
                 print(f"  SKIP（座標なし・DB未登録）: {store_name}")
@@ -92,37 +147,38 @@ def main():
             }).execute()
             db_store = res_ins.data[0] if res_ins.data else None
             if db_store:
-                db_store_map[normalize(store_name)] = db_store
+                db_stores[normalize(store_name)] = db_store
                 inserted_stores += 1
                 print(f"  INSERT store: {store_name}")
-            else:
-                print(f"  ERROR store: {store_name}")
-                continue
         else:
             # 座標が未設定の場合は更新
             if lat and lng and (not db_store.get("lat") or not db_store.get("lng")):
-                supabase.table("stores").update({"lat": lat, "lng": lng}).eq("id", db_store["id"]).execute()
+                supabase.table("stores").update(
+                    {"lat": lat, "lng": lng}
+                ).eq("id", db_store["id"]).execute()
                 print(f"  UPDATE 座標: {store_name}")
 
+        if not db_store:
+            continue
         store_uuid = db_store["id"]
 
-        # 商品データを normalized_prices に insert
+        # 商品を normalized_prices に insert
         rows = []
         for item in store.get("items", []):
             item_name = item.get("name", "")
             price     = item.get("price")
+            subcat    = item.get("subcategory", "")
             last_seen = str(item.get("last_seen", ""))
 
             if not item_name or not price:
                 continue
 
-            group_id = find_group_id(item_name, alias_map)
+            group_id = find_group_id(item_name, subcat, alias_map, group_subcat_map)
             if not group_id:
-                unmatched_items.append(item_name)
+                unmatched.append(f"{store_name}: {item_name}")
                 skipped_prices += 1
                 continue
 
-            # valid_from を last_seen から変換
             if len(last_seen) == 8:
                 valid_from = f"{last_seen[:4]}-{last_seen[4:6]}-{last_seen[6:8]}"
             else:
@@ -137,31 +193,28 @@ def main():
             })
 
         if rows:
-            # 100件ずつ insert
             for i in range(0, len(rows), 100):
                 supabase.table("normalized_prices").insert(rows[i:i+100]).execute()
             inserted_prices += len(rows)
-            print(f"  {store_name}: {len(rows)}件 insert")
+            print(f"  {store_name}: {len(rows)}件 insert（{skipped_prices}件スキップ）")
 
     # ビュー更新
-    print("\nマテリアライズドビュー更新中...")
+    print("\nビュー更新中...")
     supabase.rpc("refresh_price_view", {}).execute()
     print("✓ 更新完了")
 
     print(f"""
 ========================================
 完了
-  店舗 INSERT:    {inserted_stores} 件
-  価格 INSERT:    {inserted_prices} 件
-  名寄せ不可:     {skipped_prices} 件
+  店舗 INSERT:  {inserted_stores} 件
+  価格 INSERT:  {inserted_prices} 件
+  名寄せ不可:   {skipped_prices} 件
 ========================================""")
 
-    if unmatched_items:
-        unique_unmatched = list(dict.fromkeys(unmatched_items))[:20]
-        print(f"\n名寄せできなかった商品名（上位20件）:")
-        for name in unique_unmatched:
-            print(f"  「{name}」")
-        print("\n→ product_aliases に追加すると次回から検索できます")
+    if unmatched:
+        print(f"\n名寄せできなかった商品（上位30件）:")
+        for name in list(dict.fromkeys(unmatched))[:30]:
+            print(f"  {name}")
 
 if __name__ == "__main__":
     main()
