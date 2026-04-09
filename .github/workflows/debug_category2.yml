@@ -1,0 +1,48 @@
+name: Debug Tokubai Category HTML 2
+
+on:
+  workflow_dispatch:
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install httpx beautifulsoup4 lxml
+
+      - name: Analyze product item HTML structure
+        run: |
+          python3 - << 'PYEOF'
+          import httpx
+          from bs4 import BeautifulSoup
+
+          url = "https://tokubai.co.jp/product_categories/3"
+          headers = {"User-Agent": "Mozilla/5.0", "Accept-Language": "ja"}
+          r = httpx.get(url, headers=headers, timeout=15, follow_redirects=True)
+          soup = BeautifulSoup(r.text, "lxml")
+
+          # 「かぼちゃ」「白菜」などの商品名テキストを含む要素を探す
+          target_words = ["かぼちゃ", "白菜", "小松菜", "なす", "えのき"]
+          print("=== 商品名を含むタグの構造 ===")
+          for word in target_words:
+              tags = soup.find_all(string=lambda t: t and word == t.strip())
+              for t in tags[:2]:
+                  parent = t.parent
+                  gp = parent.parent if parent else None
+                  ggp = gp.parent if gp else None
+                  print(f"\n「{word}」")
+                  print(f"  直接親: <{parent.name} class='{' '.join(parent.get('class',[]))}'>")
+                  if gp:
+                      print(f"  祖父:   <{gp.name} class='{' '.join(gp.get('class',[]))}'>")
+                  if ggp:
+                      print(f"  曾祖父: <{ggp.name} class='{' '.join(ggp.get('class',[]))}'>")
+                  # aタグのhrefも確認
+                  a = parent if parent.name == 'a' else parent.find('a')
+                  if not a and gp:
+                      a = gp if gp.name == 'a' else gp.find('a')
+                  if a:
+                      print(f"  href: {a.get('href','なし')}")
+          PYEOF
