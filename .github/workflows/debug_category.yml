@@ -1,0 +1,54 @@
+name: Debug Tokubai Category HTML
+
+on:
+  workflow_dispatch:
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install httpx beautifulsoup4 lxml
+
+      - name: Analyze category page structure
+        run: |
+          python3 - << 'PYEOF'
+          import httpx
+          from bs4 import BeautifulSoup
+
+          url = "https://tokubai.co.jp/product_categories/3"
+          headers = {"User-Agent": "Mozilla/5.0", "Accept-Language": "ja"}
+
+          r = httpx.get(url, headers=headers, timeout=15, follow_redirects=True)
+          soup = BeautifulSoup(r.text, "lxml")
+
+          print("=== タイトル ===")
+          print(soup.find("title").text.strip() if soup.find("title") else "なし")
+
+          print("\n=== h1〜h3 ===")
+          for tag in soup.find_all(["h1","h2","h3"])[:10]:
+              print(f"  <{tag.name}> {tag.get_text(strip=True)[:60]}")
+
+          print("\n=== aタグのhref（最初の40件）===")
+          for a in soup.find_all("a", href=True)[:40]:
+              print(f"  href={a['href'][:80]}  text={a.get_text(strip=True)[:30]}")
+
+          print("\n=== 主要なclassを持つタグ（上位30件）===")
+          seen = set()
+          for tag in soup.find_all(True):
+              cls = " ".join(tag.get("class", []))
+              if cls and cls not in seen:
+                  seen.add(cls)
+                  text = tag.get_text(strip=True)[:40]
+                  print(f"  <{tag.name} class='{cls}'> {text}")
+              if len(seen) >= 30:
+                  break
+
+          print("\n=== テキスト行（全体から先頭60行）===")
+          lines = [l.strip() for l in soup.get_text("\n").splitlines() if l.strip()]
+          for i, line in enumerate(lines[:60]):
+              print(f"  [{i:02d}] {line[:80]}")
+          PYEOF
