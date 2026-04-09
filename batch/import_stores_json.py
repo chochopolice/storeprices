@@ -187,6 +187,7 @@ def main():
             rows.append({
                 "store_id":         store_uuid,
                 "product_group_id": group_id,
+                "item_name":        item_name,
                 "price":            int(price),
                 "valid_from":       valid_from,
                 "is_sale":          False,
