@@ -319,51 +319,23 @@ geocodeButton.addEventListener('click', geocodeAddress);
 keywordInput.addEventListener('keydown', e => { if (e.key === 'Enter') searchItems(); });
 addressInput.addEventListener('keydown', e => { if (e.key === 'Enter') geocodeAddress(); });
 
-categorySelect.addEventListener('change',  searchItems);
+categorySelect.addEventListener('change', () => { updateSubcategories(); searchItems(); });
 storeTypeSelect.addEventListener('change', searchItems);
+sortSelect.addEventListener('change', searchItems);
+radiusInput.addEventListener('change', searchItems);
 document.addEventListener('change', e => { if (e.target.id === 'subcategorySelect') searchItems(); });
-sortSelect.addEventListener('change',      searchItems);
-radiusInput.addEventListener('change',     searchItems);
-if (receiptFormEl) receiptFormEl.addEventListener('submit', submitReceipt);
-if (receiptMatchButtonEl) receiptMatchButtonEl.addEventListener('click', matchReceiptPriceWithDb);
-if (receiptPriceOkButtonEl) receiptPriceOkButtonEl.addEventListener('click', confirmMatchedPrice);
-if (receiptPriceEditButtonEl) receiptPriceEditButtonEl.addEventListener('click', enableManualPriceEdit);
-if (receiptImageInputEl) {
-  receiptImageInputEl.addEventListener('change', () => {
-    resetMatchingState();
-    restoreDraftForSelectedFile();
-  });
-}
-if (receiptStoreNameInputEl) {
-  receiptStoreNameInputEl.addEventListener('input', () => {
-    resetMatchingState();
-    persistReceiptDraft({ includeGlobal: true });
-  });
-}
-if (receiptStoreAddressInputEl) receiptStoreAddressInputEl.addEventListener('input', () => persistReceiptDraft({ includeGlobal: true }));
-if (receiptProductNameInputEl) {
-  receiptProductNameInputEl.addEventListener('input', () => {
-    resetMatchingState();
-    persistReceiptDraft({ includeGlobal: true });
-  });
-}
-if (receiptPriceInputEl) receiptPriceInputEl.addEventListener('input', () => persistReceiptDraft({ includeGlobal: true }));
-if (receiptPurchasedAtInputEl) receiptPurchasedAtInputEl.addEventListener('change', () => persistReceiptDraft({ includeGlobal: true }));
 
-// ===== 初期化 ======================================================
 window.addEventListener('load', async () => {
   try {
     initMap();
-    applyReceiptDraftToForm(loadReceiptDraftMap().__latest);
     if (CONFIG.DATA_SOURCE === 'json') {
       await loadStoresFromJson();
-      populateFilters();
     }
-    keywordInput.value = CONFIG.DEFAULT_KEYWORD;
+    await populateFilters();
+    if (keywordInput) keywordInput.value = CONFIG.DEFAULT_KEYWORD || '';
     await searchItems();
-  } catch (err) {
+  } catch(err) {
     console.error(err);
-    messageEl.textContent = err.message || '初期化に失敗しました。';
+    if (messageEl) messageEl.textContent = err.message || '初期化に失敗しました。';
   }
 });
-
