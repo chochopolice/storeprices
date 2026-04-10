@@ -692,7 +692,7 @@ async function fetchMatches(keyword, category, storeType, sortBy, radiusKm) {
         lat:          row.lat,
         lng:          row.lng,
         address:      row.address    || '',
-        matchedItem:  row.group_name,
+        matchedItem:  row.item_name || row.group_name,
         matchedPrice: row.price,
         category:     row.category   || '',
         subcategory:  row.subcategory || '',
