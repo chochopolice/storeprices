@@ -128,6 +128,7 @@ async function searchItems() {
     if (CONFIG.DATA_SOURCE === 'supabase') {
       const rows = await fetchFromSupabase(keyword, category, subcategory, storeType, radiusKm);
       const deg = radiusKm / 111;
+      console.log('[si] rows:', rows.length, 'currentLocation:', currentLocation, 'radiusKm:', radiusKm);
       matches = rows
         .filter(row => row.lat && row.lng)
         .map(row => ({
@@ -144,6 +145,7 @@ async function searchItems() {
           distanceKm:   getDistanceKm(currentLocation.lat, currentLocation.lng, row.lat, row.lng),
         }))
         .filter(r => r.distanceKm <= radiusKm + 0.5);
+      console.log('[si] matches after filter:', matches.length);
     } else {
       matches = stores.flatMap(store => {
         if (storeType && store.type !== storeType) return [];
