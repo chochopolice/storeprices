@@ -26,6 +26,8 @@ const storeNameInput    = document.getElementById('storeNameInput');
 const storeAddressInput = document.getElementById('storeAddressInput');
 const storeMatchBadge   = document.getElementById('storeMatchBadge');
 const itemsBody         = document.getElementById('itemsBody');
+const addRowBtn         = document.getElementById('addRowBtn');
+const submitButton      = document.getElementById('submitButton');
 const noteInput         = document.getElementById('noteInput');
 const receiptMessageEl  = document.getElementById('receiptMessage');
 const insertCountEl     = document.getElementById('insertCount');
@@ -33,6 +35,7 @@ const insertCountEl     = document.getElementById('insertCount');
 let currentImageBase64 = '';
 let currentImageMime   = '';
 let matchedStoreId     = null;
+let itemRows           = [];
 
 // ── 画像選択 ────────────────────────────────────────────────────────
 uploadArea.addEventListener('click', () => receiptImageInput.click());
@@ -129,12 +132,13 @@ function applyResult(data) {
   const items = data.matched_items || [];
 
   if (ocr.date)       purchasedOnInput.value = ocr.date;
-  if (ocr.store_name) storeNameInput.value   = ocr.store_name;
+  if (ocr.store_name && !storeNameInput.value) storeNameInput.value = ocr.store_name;
 
   storeMatchBadge.innerHTML = matchedStoreId
     ? `<span class="store-badge matched">✅ DB照合済み</span>`
     : `<span class="store-badge unmatched">⚠️ DB未照合（価格DBへの登録はスキップされます）</span>`;
 
+  itemRows = items.map(i => ({...i}));
   itemsBody.innerHTML = '';
   items.forEach(item => {
     const tr = document.createElement('tr');
@@ -189,4 +193,25 @@ function showStatus(msg, state = 'info') {
 function showMessage(msg, type = '') {
   receiptMessageEl.textContent = msg;
   receiptMessageEl.className   = `receipt-message ${type}`;
+}
+
+// ── 行追加 ─────────────────────────────────────────────────────────
+if (addRowBtn) {
+  addRowBtn.addEventListener('click', () => {
+    const tr = document.createElement('tr');
+    tr.className = 'unmatched';
+    tr.innerHTML = `
+      <td><input type="text" placeholder="商品名" /></td>
+      <td>—</td>
+      <td><input type="number" placeholder="円" min="1" /></td>
+      <td><span class="match-badge ng">🟡 未照合</span></td>`;
+    itemsBody.appendChild(tr);
+  });
+}
+
+// ── 投稿完了確認（Edge Functionが読み込み時点で自動登録済み） ───────
+if (submitButton) {
+  submitButton.addEventListener('click', () => {
+    showMessage('登録済みです。レシートを読み込んだ時点でDBへの価格登録が完了しています。', 'success');
+  });
 }
