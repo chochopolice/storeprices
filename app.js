@@ -244,23 +244,22 @@ function populateFilters() {
   categorySelect.addEventListener('change', updateSubcategories);
 }
 async function updateSubcategories() {
-  const subcategorySelect = document.getElementById('subcategorySelect');
-  if (!subcategorySelect) return;
+  const subcatEl = document.getElementById('subcategorySelect');
+  if (!subcatEl) return;
   const cat = categorySelect.value;
-  subcategorySelect.innerHTML = '<option value="">すべて</option>';
+  subcatEl.innerHTML = '<option value="">すべて</option>';
   if (!cat || CONFIG.DATA_SOURCE !== 'supabase') return;
   try {
     const res = await fetch(
-      `${CONFIG.SUPABASE_URL}/rest/v1/product_groups?select=subcategory&category=eq.${encodeURIComponent(cat)}&order=subcategory`,
+      `${CONFIG.SUPABASE_URL}/rest/v1/product_groups?select=canonical_name&category=eq.${encodeURIComponent(cat)}&order=canonical_name`,
       { headers: { apikey: CONFIG.SUPABASE_ANON_KEY, Authorization: `Bearer ${CONFIG.SUPABASE_ANON_KEY}` } }
     );
     if (!res.ok) return;
     const rows = await res.json();
-    const subs = [...new Set(rows.map(r => r.subcategory).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ja'));
-    subs.forEach(sub => {
+    rows.forEach(r => {
       const opt = document.createElement('option');
-      opt.value = opt.textContent = sub;
-      subcategorySelect.appendChild(opt);
+      opt.value = opt.textContent = r.canonical_name;
+      subcatEl.appendChild(opt);
     });
   } catch(e) { console.warn('サブカテゴリ取得失敗:', e); }
 }
