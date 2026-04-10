@@ -795,8 +795,11 @@ async function searchItems() {
 
   let matches;
   try {
+    console.log('[debug] fetchMatches 呼び出し', {keyword, category, storeType, radiusKm, currentLocation});
     matches = await fetchMatches(keyword, category, storeType, sortBy, radiusKm);
+    console.log('[debug] matches:', matches?.length, matches);
   } catch (err) {
+    console.error('[debug] fetchMatches エラー:', err);
     messageEl.textContent = err.message;
     return;
   }
