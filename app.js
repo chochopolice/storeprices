@@ -685,23 +685,24 @@ async function fetchMatches(keyword, category, storeType, sortBy, radiusKm) {
     });
   } else if (CONFIG.DATA_SOURCE === 'supabase') {
     const rows = await fetchFromSupabase(keyword, category, document.getElementById("subcategorySelect")?.value || "", storeType, radiusKm);
-    return rows
-      .map(row => ({
+    return rows.map(row => {
+      const distanceKm = (row.lat && row.lng)
+        ? getDistanceKm(currentLocation.lat, currentLocation.lng, row.lat, row.lng)
+        : 0;
+      return {
         storeName:    row.store_name,
-        storeType:    row.store_type,
+        storeType:    row.store_type  || '',
         lat:          row.lat,
         lng:          row.lng,
-        address:      row.address    || '',
-        matchedItem:  row.item_name || row.group_name,
+        address:      row.address     || '',
+        matchedItem:  row.item_name   || row.group_name,
         matchedPrice: row.price,
-        category:     row.category   || '',
+        category:     row.category    || '',
         subcategory:  row.subcategory || '',
-        lastSeen:     row.valid_date || '',
-        distanceKm:   getDistanceKm(
-          currentLocation.lat, currentLocation.lng, row.lat, row.lng
-        ),
-      }))
-      .filter(r => r.distanceKm <= radiusKm);
+        lastSeen:     row.valid_date  || '',
+        distanceKm,
+      };
+    }).filter(r => r.distanceKm <= radiusKm * 1.5); // bounding boxに任せつつ少し余裕を持たせる
   } else {
     throw new Error(`未知の DATA_SOURCE: ${CONFIG.DATA_SOURCE}`);
   }
@@ -795,11 +796,8 @@ async function searchItems() {
 
   let matches;
   try {
-    console.log('[debug] fetchMatches 呼び出し', {keyword, category, storeType, radiusKm, currentLocation});
     matches = await fetchMatches(keyword, category, storeType, sortBy, radiusKm);
-    console.log('[debug] matches:', matches?.length, matches);
   } catch (err) {
-    console.error('[debug] fetchMatches エラー:', err);
     messageEl.textContent = err.message;
     return;
   }
