@@ -12,7 +12,7 @@ let map, userMarker, radiusCircle;
 let storeMarkers = [];   // { marker, lat, lng } の配列（カードと同順）
 let stores = [];
 
-const currentLocation = {
+let currentLocation = {
   lat:   CONFIG.DEFAULT_LAT,
   lng:   CONFIG.DEFAULT_LNG,
   label: CONFIG.DEFAULT_LABEL,
@@ -101,9 +101,7 @@ function initMap() {
 }
 
 function updateUserLocation(lat, lng, label, useCustomIcon = false) {
-  currentLocation.lat   = lat;
-  currentLocation.lng   = lng;
-  currentLocation.label = label;
+  currentLocation = { lat, lng, label };
   // 現在地取得 → 青パルス、住所・地図クリック → オレンジ
   userMarker.setIcon(useCustomIcon ? customPointIcon : userLocationIcon);
   userMarker.setLatLng([lat, lng]);
