@@ -2,17 +2,15 @@
  * receipt.js  ─  レシート投稿
  *
  * フロー:
- *   1. 画像選択 → プレビュー
- *   2. 「AIで読み込む」→ Edge Function (ocr-receipt) へ送信
- *      Edge Function 内で:
- *        ① Claude OCR
- *        ② product_groups と名寄せ
- *        ③ normalized_prices に自動INSERT
- *        ④ user_receipt_submissions に保存
- *        ⑤ ビュー更新
- *   3. 結果をテーブル表示（名寄せ済み🟢 / 未照合🟡）
+ *   1. 店舗をドロップダウンで選択（stores テーブルから取得）
+ *   2. レシート画像を選択
+ *   3. 「AIで解析」→ Edge Function（OCRと名寄せのみ）
+ *   4. 結果をテーブルに表示（商品名・グループ名・価格を編集可能）
+ *   5. 「この内容で投稿する」→ normalized_prices + user_receipt_submissions に登録
  */
 
+const storeSelect       = document.getElementById('storeSelect');
+const purchasedOnInput  = document.getElementById('purchasedOnInput');
 const uploadArea        = document.getElementById('uploadArea');
 const receiptImageInput = document.getElementById('receiptImageInput');
 const previewArea       = document.getElementById('previewArea');
@@ -21,21 +19,61 @@ const previewName       = document.getElementById('previewName');
 const ocrStatus         = document.getElementById('ocrStatus');
 const ocrButton         = document.getElementById('ocrButton');
 const step2Panel        = document.getElementById('step2Panel');
-const purchasedOnInput  = document.getElementById('purchasedOnInput');
-const storeNameInput    = document.getElementById('storeNameInput');
-const storeAddressInput = document.getElementById('storeAddressInput');
-const storeMatchBadge   = document.getElementById('storeMatchBadge');
 const itemsBody         = document.getElementById('itemsBody');
 const addRowBtn         = document.getElementById('addRowBtn');
-const submitButton      = document.getElementById('submitButton');
+const summaryBar        = document.getElementById('summaryBar');
 const noteInput         = document.getElementById('noteInput');
+const submitButton      = document.getElementById('submitButton');
 const receiptMessageEl  = document.getElementById('receiptMessage');
-const insertCountEl     = document.getElementById('insertCount');
 
 let currentImageBase64 = '';
 let currentImageMime   = '';
-let matchedStoreId     = null;
-let itemRows           = [];
+let ocrResult          = null;   // { ocr, matched_items }
+let groupList          = [];     // product_groupsの一覧（グループ名選択用）
+
+const headers = () => ({
+  apikey:        CONFIG.SUPABASE_ANON_KEY,
+  Authorization: `Bearer ${CONFIG.SUPABASE_ANON_KEY}`,
+  'Content-Type': 'application/json',
+});
+
+// ── 初期化 ─────────────────────────────────────────────────────────
+window.addEventListener('load', async () => {
+  await loadStores();
+  await loadGroups();
+  purchasedOnInput.value = new Date().toISOString().slice(0, 10);
+});
+
+async function loadStores() {
+  try {
+    const res = await fetch(
+      `${CONFIG.SUPABASE_URL}/rest/v1/stores?select=id,name,address&order=name`,
+      { headers: headers() }
+    );
+    const stores = await res.json();
+    storeSelect.innerHTML = '<option value="">店舗を選択してください</option>';
+    stores.forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s.id;
+      opt.textContent = s.name + (s.address ? `（${s.address}）` : '');
+      storeSelect.appendChild(opt);
+    });
+  } catch(e) {
+    storeSelect.innerHTML = '<option value="">店舗の読み込みに失敗しました</option>';
+  }
+}
+
+async function loadGroups() {
+  try {
+    const res = await fetch(
+      `${CONFIG.SUPABASE_URL}/rest/v1/product_groups?select=id,canonical_name,category,subcategory&order=canonical_name`,
+      { headers: headers() }
+    );
+    groupList = await res.json();
+  } catch(e) {
+    console.warn('product_groups 読み込み失敗:', e);
+  }
+}
 
 // ── 画像選択 ────────────────────────────────────────────────────────
 uploadArea.addEventListener('click', () => receiptImageInput.click());
@@ -44,8 +82,7 @@ uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('drag
 uploadArea.addEventListener('drop', e => {
   e.preventDefault();
   uploadArea.classList.remove('dragover');
-  const file = e.dataTransfer.files[0];
-  if (file) handleFileSelected(file);
+  if (e.dataTransfer.files[0]) handleFileSelected(e.dataTransfer.files[0]);
 });
 receiptImageInput.addEventListener('change', () => {
   if (receiptImageInput.files[0]) handleFileSelected(receiptImageInput.files[0]);
@@ -58,11 +95,10 @@ function handleFileSelected(file) {
   }
   const reader = new FileReader();
   reader.onload = e => {
-    const dataUrl = e.target.result;
-    const [header, b64] = dataUrl.split(',');
+    const [header, b64] = e.target.result.split(',');
     currentImageBase64 = b64;
     currentImageMime   = header.match(/:(.*?);/)[1];
-    previewImg.src     = dataUrl;
+    previewImg.src     = e.target.result;
     previewName.textContent = file.name;
     previewArea.style.display  = 'block';
     ocrButton.disabled         = false;
@@ -73,18 +109,18 @@ function handleFileSelected(file) {
   reader.readAsDataURL(file);
 }
 
-// ── OCR実行 ────────────────────────────────────────────────────────
+// ── OCR ────────────────────────────────────────────────────────────
 ocrButton.addEventListener('click', runOcr);
 
 async function runOcr() {
   if (!currentImageBase64) return;
+  if (!storeSelect.value) {
+    showStatus('店舗を選択してください。', 'error');
+    return;
+  }
+
   ocrButton.disabled = true;
-
-  // 店舗照合
-  const storeName = storeNameInput.value.trim();
-  if (storeName) matchedStoreId = await matchStore(storeName);
-
-  showStatus('AIでレシートを解析・DBと名寄せ中...（10〜20秒かかります）', 'running');
+  showStatus('AIでレシートを解析・名寄せ中...（10〜20秒かかります）', 'running');
   step2Panel.style.display = 'none';
 
   try {
@@ -98,12 +134,7 @@ async function runOcr() {
         'apikey':        CONFIG.SUPABASE_ANON_KEY,
         'Authorization': `Bearer ${CONFIG.SUPABASE_ANON_KEY}`,
       },
-      body: JSON.stringify({
-        base64:       currentImageBase64,
-        mime:         currentImageMime,
-        store_id:     matchedStoreId || null,
-        purchased_on: purchasedOnInput.value || null,
-      }),
+      body: JSON.stringify({ base64: currentImageBase64, mime: currentImageMime }),
     });
 
     if (!res.ok) {
@@ -111,11 +142,15 @@ async function runOcr() {
       throw new Error(err.error || `APIエラー (${res.status})`);
     }
 
-    const data = await res.json();
-    applyResult(data);
+    ocrResult = await res.json();
 
-    const inserted = data.inserted || 0;
-    showStatus(`解析完了。${inserted}件を価格DBに自動登録しました。`, 'done');
+    // 購入日をOCR結果で補完
+    if (ocrResult.ocr?.date && !purchasedOnInput.value) {
+      purchasedOnInput.value = ocrResult.ocr.date;
+    }
+
+    renderTable(ocrResult.matched_items || []);
+    showStatus(`解析完了。内容を確認して「投稿する」を押してください。`, 'done');
     step2Panel.style.display = 'block';
     step2Panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
@@ -126,60 +161,192 @@ async function runOcr() {
   }
 }
 
-// ── 結果の適用 ─────────────────────────────────────────────────────
-function applyResult(data) {
-  const ocr   = data.ocr || {};
-  const items = data.matched_items || [];
-
-  if (ocr.date)       purchasedOnInput.value = ocr.date;
-  if (ocr.store_name && !storeNameInput.value) storeNameInput.value = ocr.store_name;
-
-  storeMatchBadge.innerHTML = matchedStoreId
-    ? `<span class="store-badge matched">✅ DB照合済み</span>`
-    : `<span class="store-badge unmatched">⚠️ DB未照合（価格DBへの登録はスキップされます）</span>`;
-
-  itemRows = items.map(i => ({...i}));
+// ── テーブル描画（編集可能） ────────────────────────────────────────
+function renderTable(items) {
   itemsBody.innerHTML = '';
-  items.forEach(item => {
-    const tr = document.createElement('tr');
-    tr.className = item.matched ? 'matched' : 'unmatched';
-    tr.innerHTML = `
-      <td>${esc(item.raw_name)}</td>
-      <td>${esc(item.canonical_name || '—')}</td>
-      <td>${item.price != null ? item.price + '円' : '—'}</td>
-      <td><span class="match-badge ${item.matched ? 'ok' : 'ng'}">
-        ${item.matched ? '🟢 照合済' : '🟡 未照合'}
-      </span></td>`;
-    itemsBody.appendChild(tr);
+  items.forEach((item, i) => addTableRow(item, i));
+  updateSummary();
+}
+
+function addTableRow(item = {}, index = null) {
+  const tr = document.createElement('tr');
+  tr.className = item.matched ? 'matched' : 'unmatched';
+  tr.dataset.matched  = item.matched ? '1' : '0';
+  tr.dataset.groupId  = item.group_id || '';
+  tr.dataset.category = item.category || '';
+  tr.dataset.subcategory = item.subcategory || '';
+
+  // グループ名選択肢
+  const groupOptions = groupList.map(g =>
+    `<option value="${esc(g.id)}" data-cat="${esc(g.category)}" data-sub="${esc(g.subcategory)}"
+      ${g.canonical_name === item.canonical_name ? 'selected' : ''}>${esc(g.canonical_name)}</option>`
+  ).join('');
+
+  tr.innerHTML = `
+    <td><input type="text" value="${esc(item.raw_name || '')}" class="inp-name" placeholder="商品名" /></td>
+    <td>
+      <select class="inp-group">
+        <option value="">（未照合）</option>
+        ${groupOptions}
+      </select>
+    </td>
+    <td><input type="number" value="${item.price != null ? item.price : ''}" class="inp-price" min="1" placeholder="円" /></td>
+    <td><span class="match-badge ${item.matched ? 'ok' : 'ng'}" id="badge-${tr.dataset.idx}">
+      ${item.matched ? '🟢 照合済' : '🟡 未照合'}
+    </span></td>
+    <td><button class="del-btn" type="button">✕</button></td>`;
+
+  // グループ変更時にバッジとデータ更新
+  tr.querySelector('.inp-group').addEventListener('change', e => {
+    const sel = e.target;
+    const opt = sel.options[sel.selectedIndex];
+    tr.dataset.groupId    = sel.value;
+    tr.dataset.category   = opt.dataset.cat || '';
+    tr.dataset.subcategory = opt.dataset.sub || '';
+    const badge = tr.querySelector('.match-badge');
+    if (sel.value) {
+      tr.dataset.matched = '1';
+      tr.className = 'matched';
+      badge.className = 'match-badge ok';
+      badge.textContent = '🟢 照合済';
+    } else {
+      tr.dataset.matched = '0';
+      tr.className = 'unmatched';
+      badge.className = 'match-badge ng';
+      badge.textContent = '🟡 未照合';
+    }
+    updateSummary();
   });
 
-  const matchedCount = items.filter(i => i.matched).length;
-  if (insertCountEl) {
-    insertCountEl.textContent =
-      `価格DB登録: ${matchedCount}件 ／ 未登録: ${items.length - matchedCount}件`;
+  // 削除
+  tr.querySelector('.del-btn').addEventListener('click', () => {
+    tr.remove();
+    updateSummary();
+  });
+
+  itemsBody.appendChild(tr);
+  updateSummary();
+  return tr;
+}
+
+function updateSummary() {
+  const rows = [...itemsBody.querySelectorAll('tr')];
+  const matched = rows.filter(r => r.dataset.matched === '1').length;
+  summaryBar.textContent = `全${rows.length}件 / DB照合済み: ${matched}件 / 未照合: ${rows.length - matched}件`;
+}
+
+// 行追加
+addRowBtn.addEventListener('click', () => {
+  addTableRow({});
+  itemsBody.lastElementChild?.querySelector('.inp-name')?.focus();
+});
+
+// ── 投稿 ───────────────────────────────────────────────────────────
+submitButton.addEventListener('click', submitReceipt);
+
+async function submitReceipt() {
+  const storeId    = storeSelect.value;
+  const purchasedOn = purchasedOnInput.value || new Date().toISOString().slice(0, 10);
+  const note       = noteInput.value.trim();
+
+  if (!storeId) {
+    showMessage('店舗を選択してください。', 'error');
+    return;
+  }
+
+  // テーブルから現在の値を収集
+  const rows = [...itemsBody.querySelectorAll('tr')];
+  const lineItems = rows.map(tr => ({
+    raw_name:       tr.querySelector('.inp-name')?.value?.trim() || '',
+    price:          Number(tr.querySelector('.inp-price')?.value) || null,
+    group_id:       tr.dataset.groupId || null,
+    canonical_name: tr.querySelector('.inp-group')?.options[tr.querySelector('.inp-group').selectedIndex]?.textContent || null,
+    category:       tr.dataset.category || null,
+    subcategory:    tr.dataset.subcategory || null,
+    matched:        tr.dataset.matched === '1',
+  })).filter(r => r.raw_name || r.price);
+
+  if (lineItems.length === 0) {
+    showMessage('商品が1件もありません。', 'error');
+    return;
+  }
+
+  submitButton.disabled = true;
+  showMessage('投稿中...', '');
+
+  try {
+    // ① normalized_prices に INSERT（照合済み商品のみ）
+    const priceRows = lineItems
+      .filter(i => i.group_id && i.price)
+      .map(i => ({
+        store_id:         storeId,
+        product_group_id: i.group_id,
+        item_name:        i.raw_name,
+        price:            i.price,
+        valid_from:       purchasedOn,
+        is_sale:          false,
+      }));
+
+    if (priceRows.length > 0) {
+      const r = await fetch(`${CONFIG.SUPABASE_URL}/rest/v1/normalized_prices`, {
+        method: 'POST',
+        headers: { ...headers(), Prefer: 'return=minimal' },
+        body: JSON.stringify(priceRows),
+      });
+      if (!r.ok) throw new Error(`価格DB登録失敗 (${r.status})`);
+    }
+
+    // ② user_receipt_submissions に INSERT
+    const r2 = await fetch(`${CONFIG.SUPABASE_URL}/rest/v1/user_receipt_submissions`, {
+      method: 'POST',
+      headers: { ...headers(), Prefer: 'return=minimal' },
+      body: JSON.stringify({
+        store_id:     storeId,
+        store_name:   storeSelect.options[storeSelect.selectedIndex].textContent.split('（')[0],
+        purchased_on: purchasedOn,
+        line_items:   lineItems,
+        note:         note || null,
+        source_type:  'user_receipt',
+        raw_ocr_text: ocrResult ? JSON.stringify(ocrResult.ocr) : null,
+      }),
+    });
+    if (!r2.ok) throw new Error(`投稿記録保存失敗 (${r2.status})`);
+
+    // ③ ビュー更新
+    await fetch(`${CONFIG.SUPABASE_URL}/rest/v1/rpc/refresh_price_view`, {
+      method: 'POST',
+      headers: headers(),
+      body: '{}',
+    });
+
+    showMessage(
+      `投稿完了！価格DB登録: ${priceRows.length}件 ／ 未照合: ${lineItems.length - priceRows.length}件`,
+      'success'
+    );
+
+    // リセット
+    setTimeout(() => {
+      step2Panel.style.display = 'none';
+      ocrStatus.style.display  = 'none';
+      previewArea.style.display = 'none';
+      receiptImageInput.value  = '';
+      currentImageBase64 = '';
+      ocrButton.disabled = true;
+      noteInput.value = '';
+      itemsBody.innerHTML = '';
+      ocrResult = null;
+    }, 4000);
+
+  } catch(err) {
+    showMessage(err.message, 'error');
+  } finally {
+    submitButton.disabled = false;
   }
 }
 
-// ── 店舗照合 ────────────────────────────────────────────────────────
-async function matchStore(storeName) {
-  try {
-    const res = await fetch(
-      `${CONFIG.SUPABASE_URL}/rest/v1/stores?select=id,name&name=ilike.*${encodeURIComponent(storeName)}*&limit=5`,
-      { headers: { apikey: CONFIG.SUPABASE_ANON_KEY, Authorization: `Bearer ${CONFIG.SUPABASE_ANON_KEY}` } }
-    );
-    if (!res.ok) return null;
-    const rows = await res.json();
-    if (!rows.length) return null;
-    const norm = t => String(t||'').toLowerCase().replace(/\s/g,'');
-    return rows.sort((a,b) => {
-      const sa = norm(a.name), sb = norm(b.name), sn = norm(storeName);
-      return (sb.includes(sn) ? 1 : 0) - (sa.includes(sn) ? 1 : 0);
-    })[0].id;
-  } catch { return null; }
-}
-
+// ── ユーティリティ ─────────────────────────────────────────────────
 function esc(s) {
-  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
 }
 
 function showStatus(msg, state = 'info') {
@@ -193,25 +360,4 @@ function showStatus(msg, state = 'info') {
 function showMessage(msg, type = '') {
   receiptMessageEl.textContent = msg;
   receiptMessageEl.className   = `receipt-message ${type}`;
-}
-
-// ── 行追加 ─────────────────────────────────────────────────────────
-if (addRowBtn) {
-  addRowBtn.addEventListener('click', () => {
-    const tr = document.createElement('tr');
-    tr.className = 'unmatched';
-    tr.innerHTML = `
-      <td><input type="text" placeholder="商品名" /></td>
-      <td>—</td>
-      <td><input type="number" placeholder="円" min="1" /></td>
-      <td><span class="match-badge ng">🟡 未照合</span></td>`;
-    itemsBody.appendChild(tr);
-  });
-}
-
-// ── 投稿完了確認（Edge Functionが読み込み時点で自動登録済み） ───────
-if (submitButton) {
-  submitButton.addEventListener('click', () => {
-    showMessage('登録済みです。レシートを読み込んだ時点でDBへの価格登録が完了しています。', 'success');
-  });
 }
