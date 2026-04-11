@@ -9,7 +9,10 @@
  *   5. 「この内容で投稿する」→ normalized_prices + user_receipt_submissions に登録
  */
 
-const storeSelect       = document.getElementById('storeSelect');
+const storeSearchInput  = document.getElementById('storeSearchInput');
+const storeSelect       = document.getElementById('storeSelect');  // hidden input (store_id)
+const storeCandidates   = document.getElementById('storeCandidates');
+const storeSelectedBadge = document.getElementById('storeSelectedBadge');
 const purchasedOnInput  = document.getElementById('purchasedOnInput');
 const uploadArea        = document.getElementById('uploadArea');
 const receiptImageInput = document.getElementById('receiptImageInput');
@@ -44,23 +47,62 @@ window.addEventListener('load', async () => {
   purchasedOnInput.value = new Date().toISOString().slice(0, 10);
 });
 
+let allStores = [];
+
 async function loadStores() {
   try {
     const res = await fetch(
       `${CONFIG.SUPABASE_URL}/rest/v1/stores?select=id,name,address&order=name`,
       { headers: headers() }
     );
-    const stores = await res.json();
-    storeSelect.innerHTML = '<option value="">店舗を選択してください</option>';
-    stores.forEach(s => {
-      const opt = document.createElement('option');
-      opt.value = s.id;
-      opt.textContent = s.name + (s.address ? `（${s.address}）` : '');
-      storeSelect.appendChild(opt);
-    });
+    allStores = await res.json();
+    setupStoreSearch();
   } catch(e) {
-    storeSelect.innerHTML = '<option value="">店舗の読み込みに失敗しました</option>';
+    storeSearchInput.placeholder = '店舗の読み込みに失敗しました';
   }
+}
+
+function setupStoreSearch() {
+  storeSearchInput.addEventListener('input', () => {
+    const q = storeSearchInput.value.trim();
+    // 選択をリセット
+    storeSelect.value = '';
+    storeSelectedBadge.style.display = 'none';
+
+    if (!q) { storeCandidates.style.display = 'none'; return; }
+
+    const matched = allStores.filter(s =>
+      s.name.includes(q) || s.name.toLowerCase().includes(q.toLowerCase())
+    ).slice(0, 8);
+
+    if (!matched.length) { storeCandidates.style.display = 'none'; return; }
+
+    storeCandidates.innerHTML = '';
+    matched.forEach(s => {
+      const div = document.createElement('div');
+      div.style.cssText = 'padding:8px 12px; cursor:pointer; font-size:13px; border-bottom:1px solid #eee;';
+      div.innerHTML = `<strong>${esc(s.name)}</strong>` +
+        (s.address ? `<br><span style="font-size:11px;color:#888">${esc(s.address)}</span>` : '');
+      div.addEventListener('mouseenter', () => div.style.background = '#eef4fc');
+      div.addEventListener('mouseleave', () => div.style.background = '');
+      div.addEventListener('click', () => {
+        storeSelect.value = s.id;
+        storeSearchInput.value = s.name;
+        storeCandidates.style.display = 'none';
+        storeSelectedBadge.textContent = `✅ ${s.name}${s.address ? '（' + s.address + '）' : ''}`;
+        storeSelectedBadge.style.display = 'block';
+      });
+      storeCandidates.appendChild(div);
+    });
+    storeCandidates.style.display = 'block';
+  });
+
+  // 候補以外クリックで閉じる
+  document.addEventListener('click', e => {
+    if (!storeCandidates.contains(e.target) && e.target !== storeSearchInput) {
+      storeCandidates.style.display = 'none';
+    }
+  });
 }
 
 async function loadGroups() {
@@ -115,7 +157,8 @@ ocrButton.addEventListener('click', runOcr);
 async function runOcr() {
   if (!currentImageBase64) return;
   if (!storeSelect.value) {
-    showStatus('店舗を選択してください。', 'error');
+    showStatus('店舗を入力・選択してください。', 'error');
+    storeSearchInput.focus();
     return;
   }
 
@@ -302,7 +345,7 @@ async function submitReceipt() {
       headers: { ...headers(), Prefer: 'return=minimal' },
       body: JSON.stringify({
         store_id:     storeId,
-        store_name:   storeSelect.options[storeSelect.selectedIndex].textContent.split('（')[0],
+        store_name:   storeSearchInput.value.trim(),
         purchased_on: purchasedOn,
         line_items:   lineItems,
         note:         note || null,

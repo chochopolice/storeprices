@@ -129,10 +129,11 @@
       </div>
 
       <div class="field">
-        <span>店舗を選択（必須）</span>
-        <select id="storeSelect">
-          <option value="">読み込み中...</option>
-        </select>
+        <span>店舗名を入力（必須）</span>
+        <input type="text" id="storeSearchInput" placeholder="例: オーケー、マルエツ..." autocomplete="off" />
+        <div id="storeCandidates" style="display:none; border:1.5px solid #d0d8e4; border-radius:6px; background:#fff; max-height:200px; overflow-y:auto; margin-top:2px;"></div>
+        <input type="hidden" id="storeSelect" />
+        <div id="storeSelectedBadge" style="display:none; margin-top:6px; font-size:12px; padding:6px 10px; background:#eaf3de; color:#27500a; border-radius:6px;"></div>
       </div>
 
       <div class="two-col">
