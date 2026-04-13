@@ -124,11 +124,17 @@ def _upsert_stores(supabase, stores_json: list) -> dict[str, str]:
             print(f"  スキップ（既存）: {s['name']}")
             continue
 
+        lat = s.get("lat")
+        lng = s.get("lng")
+        if lat is None or lng is None:
+            print(f"  スキップ（座標不足）: {s['name']} (lat/lng が未設定)")
+            continue
+
         res = supabase.table("stores").insert({
             "name":    s["name"],
             "type":    s.get("type", ""),
-            "lat":     s["lat"],
-            "lng":     s["lng"],
+            "lat":     lat,
+            "lng":     lng,
             "address": s.get("address", ""),
         }).execute()
 
