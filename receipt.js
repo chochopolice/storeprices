@@ -219,18 +219,41 @@ function addTableRow(item = {}, index = null) {
   tr.dataset.category = item.category || '';
   tr.dataset.subcategory = item.subcategory || '';
 
-  // グループ名選択肢
-  const groupOptions = groupList.map(g =>
-    `<option value="${esc(g.id)}" data-cat="${esc(g.category)}" data-sub="${esc(g.subcategory)}"
-      ${g.canonical_name === item.canonical_name ? 'selected' : ''}>${esc(g.canonical_name)}</option>`
+  const allSubcategories = Array.from(new Set(
+    groupList
+      .map(g => (g.subcategory || '').trim())
+      .filter(Boolean)
+  )).sort((a, b) => a.localeCompare(b, 'ja'));
+
+  const selectedSubcategory = item.subcategory || '';
+
+  const subcategoryOptions = allSubcategories.map(sub =>
+    `<option value="${esc(sub)}" ${sub === selectedSubcategory ? 'selected' : ''}>${esc(sub)}</option>`
   ).join('');
+
+  const buildGroupOptions = (subcategory) => {
+    const filtered = subcategory
+      ? groupList.filter(g => (g.subcategory || '') === subcategory)
+      : groupList;
+    const currentGroupId = item.group_id || '';
+    return filtered.map(g =>
+      `<option value="${esc(g.id)}" data-cat="${esc(g.category)}" data-sub="${esc(g.subcategory)}"
+        ${String(g.id) === String(currentGroupId) ? 'selected' : ''}>${esc(g.canonical_name)}</option>`
+    ).join('');
+  };
 
   tr.innerHTML = `
     <td><input type="text" value="${esc(item.raw_name || '')}" class="inp-name" placeholder="商品名" /></td>
     <td>
+      <select class="inp-subcategory">
+        <option value="">（指定なし）</option>
+        ${subcategoryOptions}
+      </select>
+    </td>
+    <td>
       <select class="inp-group">
         <option value="">（未照合）</option>
-        ${groupOptions}
+        ${buildGroupOptions(selectedSubcategory)}
       </select>
     </td>
     <td><input type="number" value="${item.price != null ? item.price : ''}" class="inp-price" min="1" placeholder="円" /></td>
@@ -239,13 +262,42 @@ function addTableRow(item = {}, index = null) {
     </span></td>
     <td><button class="del-btn" type="button">✕</button></td>`;
 
+  const subcategorySel = tr.querySelector('.inp-subcategory');
+  const groupSel = tr.querySelector('.inp-group');
+
+  subcategorySel.addEventListener('change', e => {
+    const selectedSub = e.target.value;
+    tr.dataset.subcategory = selectedSub;
+
+    groupSel.innerHTML = `<option value="">（未照合）</option>${buildGroupOptions(selectedSub)}`;
+
+    const selectedOpt = groupSel.options[groupSel.selectedIndex];
+    tr.dataset.groupId = groupSel.value;
+    tr.dataset.category = selectedOpt?.dataset?.cat || '';
+
+    const badge = tr.querySelector('.match-badge');
+    if (groupSel.value) {
+      tr.dataset.matched = '1';
+      tr.className = 'matched';
+      badge.className = 'match-badge ok';
+      badge.textContent = '🟢 照合済';
+    } else {
+      tr.dataset.matched = '0';
+      tr.className = 'unmatched';
+      badge.className = 'match-badge ng';
+      badge.textContent = '🟡 未照合';
+    }
+    updateSummary();
+  });
+
   // グループ変更時にバッジとデータ更新
-  tr.querySelector('.inp-group').addEventListener('change', e => {
+  groupSel.addEventListener('change', e => {
     const sel = e.target;
     const opt = sel.options[sel.selectedIndex];
     tr.dataset.groupId    = sel.value;
     tr.dataset.category   = opt.dataset.cat || '';
     tr.dataset.subcategory = opt.dataset.sub || '';
+    if (tr.dataset.subcategory) subcategorySel.value = tr.dataset.subcategory;
     const badge = tr.querySelector('.match-badge');
     if (sel.value) {
       tr.dataset.matched = '1';
